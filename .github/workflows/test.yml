@@ -62,8 +62,10 @@ jobs:
           sudo apt-get update && sudo apt-get install -y p7zip-full
           wget --trust-server-names https://evermeet.cx/ffmpeg/get/ffmpeg/7z
           wget --trust-server-names https://evermeet.cx/ffmpeg/get/ffprobe/7z
-          7z x ffmpeg.7z -offmpeg-evermeet
-          7z x ffprobe.7z -offmpeg-evermeet
+          ffmpeg_7z=$(ls | grep -E '^ffmpeg.*\.7z$')
+          ffprobe_7z=$(ls | grep -E '^ffprobe.*\.7z$')
+          7z x "$ffmpeg_7z" -offmpeg-evermeet
+          7z x "$ffprobe_7z" -offmpeg-evermeet
           sudo cp ffmpeg-evermeet/ffmpeg /usr/local/bin/
           sudo cp ffmpeg-evermeet/ffprobe /usr/local/bin/
           ffmpeg -version
