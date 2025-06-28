@@ -30,14 +30,7 @@ jobs:
           pip install pytest
       - name: Install ffmpeg (brew)
         run: |
-          brew uninstall --ignore-dependencies ffmpeg || true
-          curl -L -o ffmpeg.7z https://evermeet.cx/ffmpeg/ffmpeg-120002-gb1172b8cc6.7z
-          7z x ffmpeg.7z
-          chmod +x ffmpeg ffprobe
-          sudo mv ffmpeg /usr/local/bin/ffmpeg
-          sudo mv ffprobe /usr/local/bin/ffprobe
-          ffmpeg -version
-          ffmpeg -h encoder=ffv1 | grep gbrp
+          brew install ffmpeg
       - name: Run tests
         run: |
           pytest tests/
@@ -64,12 +57,12 @@ jobs:
       - name: Install pytest
         run: |
           pip install pytest
-      - name: Download and install static ffmpeg (johnvansickle)
+      - name: Download and install static ffmpeg (evermeet.cx)
         run: |
-          wget -O ffmpeg-release-amd64-static.tar.xz https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
-          tar -xf ffmpeg-release-amd64-static.tar.xz
-          cd ffmpeg-*-amd64-static
-          sudo cp ffmpeg ffprobe /usr/local/bin/
+          sudo apt-get update && sudo apt-get install -y p7zip-full
+          wget -O ffmpeg-linux.7z https://evermeet.cx/ffmpeg/ffmpeg-120002-gb1172b8cc6.7z
+          7z x ffmpeg-linux.7z -offmpeg-evermeet
+          sudo cp ffmpeg-evermeet/ffmpeg ffmpeg-evermeet/ffprobe /usr/local/bin/
           ffmpeg -version
           ffmpeg -h encoder=ffv1 | grep gbrp
       - name: Run tests
