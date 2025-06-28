@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from .utils import denormalize, DRWrapper
+from .utils import denormalize, DRWrapper, reorder_coords_axis
 from .ffmpeg_wrappers import _ffmpeg_read
 from .metadata import load_metadata
 
@@ -16,15 +16,16 @@ def video2parquet(input_path, array_id, name='test', exceptions='raise'):
         ext = metadata.get('ext', '.mp4')
         video_path = Path(input_path) / array_id / f'{name}{ext}'
         shape = metadata['shape']
-        minmax = metadata['minmax']
+        minmax = np.array(metadata['minmax'])
         columns = metadata['columns']
         num_frames, height, width, channels = shape
-        # Read with actual pixel format from metadata
         vcodec = metadata.get('CODEC', 'ffv1')
-        if vcodec == 'ffv1':
-            input_pix_fmt = metadata.get('OUT_PIX_FMT', 'gbrp')
-        else:
-            input_pix_fmt = 'rgb24'
+        input_pix_fmt = metadata.get('OUT_PIX_FMT', 'gbrp')
+        # For ffv1+gbrp16le, reorder minmax from ordering back to RGB before denormalization
+        if vcodec == 'ffv1' and input_pix_fmt == 'gbrp16le':
+            ordering = metadata.get('CHANNEL_ORDER', 'gbr')
+            channel_idx = [list(ordering).index(c) for c in list('rgb')]
+            minmax = minmax[channel_idx]
         loglevel = 'quiet'
         array, meta_info = _ffmpeg_read(str(video_path), loglevel=loglevel)
         orig_shape = meta_info.get('shape', None)
@@ -36,8 +37,16 @@ def video2parquet(input_path, array_id, name='test', exceptions='raise'):
             print(f"DEBUG: array.dtype={array.dtype}, meta_info={meta_info}")
             print(f"DEBUG: metadata={metadata}")
             raise ValueError(f"Read buffer size {array.size} does not match expected shape {orig_shape}.")
-        if metadata.get('normalized', False):
+        # Denormalize for ffv1+gbrp16le as float32
+        if vcodec == 'ffv1' and input_pix_fmt == 'gbrp16le':
+            array = denormalize(array, minmax, bits=16).astype(np.float32)
+            # Swap from ordering back to RGB
+            ordering = metadata.get('CHANNEL_ORDER', 'gbr')
+            array = reorder_coords_axis(array, list(ordering), list('rgb'), axis=-1)
+        elif metadata.get('normalized', False):
             array = denormalize(array, minmax)
+        # Save reconstructed array as .npy for direct roundtrip test
+        np.save(Path(input_path) / array_id / f'reconstructed_{name}.npy', array)
         # PCA inverse
         pca_params = metadata.get('pca_params', None)
         if pca_params not in [None, 'None']:
@@ -50,19 +59,17 @@ def video2parquet(input_path, array_id, name='test', exceptions='raise'):
         array = array[:num_frames, :height, :width, :channels]
         flat = array.reshape(num_frames, -1)
         # Robustly handle column mismatch due to padding
-        if flat.shape[1] < len(columns):
-            # Pad with zeros
-            pad = np.zeros((num_frames, len(columns) - flat.shape[1]), dtype=flat.dtype)
-            flat = np.concatenate([flat, pad], axis=1)
-            print(f"WARNING: Padding reconstructed DataFrame from {flat.shape[1]} to {len(columns)} columns.")
-        elif flat.shape[1] > len(columns):
-            # Truncate
-            flat = flat[:, :len(columns)]
-            print(f"WARNING: Truncating reconstructed DataFrame from {flat.shape[1]} to {len(columns)} columns.")
-        df = pd.DataFrame(flat, columns=columns)
-        parquet_out = Path(input_path) / array_id / f'reconstructed_{name}.parquet'
-        df.to_parquet(parquet_out)
-        return parquet_out
+        if columns is not None:
+            if flat.shape[1] < len(columns):
+                # Pad with zeros if needed
+                pad_width = len(columns) - flat.shape[1]
+                flat = np.pad(flat, ((0, 0), (0, pad_width)), mode='constant')
+            df_recon = pd.DataFrame(flat, columns=columns)
+            out_path = Path(input_path) / array_id / f'reconstructed_{name}.parquet'
+            df_recon.to_parquet(out_path)
+            return out_path
+        # For direct array roundtrip, just save .npy and return
+        return
     except Exception as e:
         print(f'Exception in video2parquet: {e}')
         if exceptions == 'raise':

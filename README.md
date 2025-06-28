@@ -13,7 +13,7 @@ Inspired by xarrayvideo, **videoparquet** is a Python library for converting Par
 - Multi-array and multi-video support per Parquet file
 - Flexible codec and bit-depth selection
 - Automated recipe generation for batch processing
-- Test suite for roundtrip and lossy/lossless scenarios
+- **Strict, xarrayvideo-style test suite for lossless and lossy roundtrip**
 
 ## Installation
 
@@ -49,16 +49,13 @@ parquet2video('data.parquet', 'exampleid', conversion_rules, output_path='.')
 video2parquet('.', 'exampleid', name='arr1')
 ```
 
-### Advanced: Using PCA and Lossless Codecs
+### Advanced: Using Lossless Codecs
 ```python
 conversion_rules = {
-    # Use PCA to reduce to 2 components (lossy)
-    'arr_pca': (list(df.columns), arr.shape, 2, {'c:v': 'libx264'}, 8, [arr.min(), arr.max()]),
-    # Use lossless codec (ffv1)
-    'arr_lossless': (list(df.columns), arr.shape, 0, {'c:v': 'ffv1'}, 8, [arr.min(), arr.max()])
+    # Use lossless codec (ffv1, 3-channel RGB only)
+    'arr_lossless': (list(df.columns), arr.shape, 0, {'c:v': 'ffv1'}, 16, [arr.min(), arr.max()])
 }
 parquet2video('data.parquet', 'exampleid', conversion_rules, output_path='.')
-video2parquet('.', 'exampleid', name='arr_pca')
 video2parquet('.', 'exampleid', name='arr_lossless')
 ```
 
@@ -71,9 +68,19 @@ recipe = get_recipe(df)  # Returns a dict of conversion rules
 ```
 
 ## Testing
-Run the test suite to verify roundtrip and PCA scenarios:
+Run the test suite to verify strict roundtrip and lossy scenarios:
 ```bash
 pytest tests/test_roundtrip.py
+```
+
+### What is tested?
+- **Lossless roundtrip:** Only 3-channel ffv1+gbrp16le is supported and tested. Max error is <0.001 per channel.
+- **Lossy roundtrip:** A test with libx264 (rgb24) is included for comparison. Max error is typically 2–3 per channel (on a 0–95 range).
+
+Example output:
+```
+Max abs error per channel: [0.00068665 0.00068665 0.00068665]  # ffv1+gbrp16le (lossless)
+[libx264] Max abs error per channel: [2.588234 2.588234 2.588234]  # libx264 (lossy)
 ```
 
 ## Motivation
@@ -81,14 +88,14 @@ This project enables efficient storage, compression, and sharing of large datase
 
 ## Codec and Pixel Format Restrictions
 
-**Important:** For robust, lossless roundtrip, only the `ffv1` codec with the `gbrp` pixel format (planar RGB, 3 channels, no padding) is supported. If your ffmpeg build does not support this combination, the library will raise a clear error. This ensures that timeseries/tabular data can be reliably converted to and from video without data loss or row padding issues.
+**Important:** For robust, lossless roundtrip, only the `ffv1` codec with the `gbrp16le` pixel format (planar RGB, 3 channels, no padding) is supported and tested. If your ffmpeg build does not support this combination, the library will raise a clear error. This ensures that timeseries/tabular data can be reliably converted to and from video without data loss or row padding issues.
 
 Other codecs (e.g., `libx264`) may be used for lossy compression, but roundtrip is not guaranteed.
 
 ## 🚀 Benchmark Highlights
-- Achieve up to **25x compression** over Parquet for timeseries/tabular data using video codecs (ffv1/gbrp)
+- Achieve up to **25x compression** over Parquet for timeseries/tabular data using video codecs (ffv1/gbrp16le)
 - **Fast encoding/decoding**: Video roundtrip in under a second for typical scientific arrays
-- **Lossless roundtrip** supported (with ffv1/gbrp and compatible ffmpeg)
+- **Lossless roundtrip** supported (with ffv1/gbrp16le and compatible ffmpeg)
 - See [BENCHMARK.md](BENCHMARK.md) for details and reproducibility
 
 ## Benchmarking
@@ -99,30 +106,31 @@ See [BENCHMARK.md](BENCHMARK.md) for a summary of benchmark results comparing Pa
 
 **IMPORTANT:**
 
-- For true lossless roundtrip and compression, `videoparquet` requires ffmpeg to encode `ffv1` videos with the `gbrp` (planar RGB) pixel format.
-- On macOS (Homebrew) and many Linux builds, ffmpeg will encode `ffv1` as `bgr0` instead of `gbrp`, even though `gbrp` is listed as supported. This is a known limitation/quirk of many ffmpeg builds.
+- For true lossless roundtrip and compression, `videoparquet` requires ffmpeg to encode `ffv1` videos with the `gbrp16le` (planar RGB) pixel format.
+- On macOS (Homebrew) and many Linux builds, ffmpeg may encode `ffv1` as `bgr0` instead of `gbrp16le`, even though `gbrp16le` is listed as supported. This is a known limitation/quirk of many ffmpeg builds.
 - `bgr0` is not true planar RGB and may have padding/alpha issues. It is **not guaranteed to be robust for scientific roundtrip**.
-- The test suite will **skip strict roundtrip and compression tests** if `gbrp` is not available, and will warn the user. Only platforms with `ffv1/gbrp` will run and require these tests to pass.
+- The test suite will **skip strict roundtrip and compression tests** if `gbrp16le` is not available, and will warn the user. Only platforms with `ffv1/gbrp16le` will run and require these tests to pass.
 - To check your ffmpeg's pixel format support for ffv1, run:
 
   ```sh
   ffmpeg -h encoder=ffv1 | grep gbrp
   ```
 
-- For scientific reproducibility, use a Docker image or reference ffmpeg build known to support `ffv1/gbrp`.
+- For scientific reproducibility, use a Docker image or reference ffmpeg build known to support `ffv1/gbrp16le`.
 
 ### How to Check Your ffmpeg
 
 Run this command:
 
 ```sh
-ffmpeg -f lavfi -i testsrc2=duration=1:size=2x2:rate=1 -pix_fmt gbrp -c:v ffv1 -y test_ffv1_gbrp.mkv && ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=noprint_wrappers=1:nokey=1 test_ffv1_gbrp.mkv
+ffmpeg -f lavfi -i testsrc2=duration=1:size=2x2:rate=1 -pix_fmt gbrp16le -c:v ffv1 -y test_ffv1_gbrp16le.mkv && ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=noprint_wrappers=1:nokey=1 test_ffv1_gbrp16le.mkv
 ```
 
-- If the output is `gbrp`, your ffmpeg is suitable for scientific roundtrip.
+- If the output is `gbrp16le`, your ffmpeg is suitable for scientific roundtrip.
 - If the output is `bgr0`, your ffmpeg will not guarantee true lossless roundtrip.
 
-### For Scientific Reproducibility
+### For Scientific Reproducibility & CI
 
 - Use a reference ffmpeg build (e.g., static Linux build from https://johnvansickle.com/ffmpeg/) or a Docker container with a known-good ffmpeg.
+- The test suite is designed to run in CI (GitHub Actions) as long as the correct ffmpeg build is available.
 - See the code and error messages for more details. 

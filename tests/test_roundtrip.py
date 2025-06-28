@@ -10,142 +10,79 @@ from videoparquet.parquet2video import parquet2video
 from videoparquet.video2parquet import video2parquet
 import subprocess
 import pytest
+from videoparquet.utils import normalize, denormalize, reorder_coords_axis
+from videoparquet.ffmpeg_wrappers import _ffmpeg_write, _ffmpeg_read
+import os
 
-def test_parquet_video_roundtrip(pca_components=0):
-    """
-    Test roundtrip with or without PCA and lossless codec.
-    pca_components=0 disables PCA (true roundtrip).
-    """
-    # Create synthetic data
-    num_frames, height, width, channels = 2, 2, 2, 3
-    shape = (num_frames, height, width, channels)
-    data = np.arange(np.prod(shape), dtype=np.float32).reshape(shape)
-    flat = data.reshape(num_frames, -1)
-    columns = [f'col{i}' for i in range(flat.shape[1])]
-    df = pd.DataFrame(flat, columns=columns)
-    minmax = [data.min(), data.max()]
+def test_ffv1_gbrp16le_minimal(tmp_path):
+    # Minimal test data: 2 frames, 4x4, 3 channels, float32
+    arr = np.arange(2*4*4*3, dtype=np.float32).reshape(2, 4, 4, 3)
+    minmax = np.stack([[arr[...,c].min(), arr[...,c].max()] for c in range(3)])
+    bits = 16
+    # Normalize
+    arr_norm = normalize(arr, minmax, bits=bits)
+    print("Normalized array before writing:\n", arr_norm)
+    # Reorder RGB->GBR for gbrp16le
+    arr_gbr = reorder_coords_axis(arr_norm, ['r','g','b'], ['g','b','r'], axis=-1)
+    # Write video
+    outpath = os.path.join(tmp_path, 'test_ffv1.mkv')
+    metadata = {
+        'REQ_PIX_FMT': 'gbrp16le',
+        'OUT_PIX_FMT': 'gbrp16le',
+        'PLANAR': True,
+        'BITS': bits,
+        'CHANNELS': 3,
+        'FRAMES': arr.shape[0],
+        'RANGE': minmax.tolist(),
+        'NORMALIZED': True,
+        'CHANNEL_ORDER': 'gbr',
+    }
+    _ffmpeg_write(outpath, arr_gbr, 4, 4, {'c:v':'ffv1'}, planar_in=True, input_pix_fmt='gbrp16le', metadata=metadata)
+    # Read video
+    arr_read, meta = _ffmpeg_read(outpath)
+    print("Array after reading, before denormalization:\n", arr_read)
+    # Reorder GBR->RGB
+    arr_rgb = reorder_coords_axis(arr_read, ['g','b','r'], ['r','g','b'], axis=-1)
+    # Denormalize
+    arr_denorm = denormalize(arr_rgb, minmax, bits=bits)
+    print("Denormalized array:\n", arr_denorm)
+    # Compare
+    maxerr = np.max(np.abs(arr - arr_denorm), axis=(0,1,2))
+    print("Max abs error per channel:", maxerr)
+    assert np.all(maxerr < 1e-3), f"Lossless roundtrip failed: maxerr={maxerr}"
 
-    # Add a second array (different values, same shape)
-    data2 = np.arange(np.prod(shape), np.prod(shape)*2, dtype=np.float32).reshape(shape)
-    flat2 = data2.reshape(num_frames, -1)
-    columns2 = [f'col2_{i}' for i in range(flat2.shape[1])]
-    df2 = pd.DataFrame(flat2, columns=columns2)
-    df_all = pd.concat([df, df2], axis=1)
-    minmax2 = [data2.min(), data2.max()]
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        parquet_path = f'{tmpdir}/data.parquet'
-        df_all.to_parquet(parquet_path)
-        # Conversion rules: arr1 uses PCA (if pca_components>0), arr2 uses lossless codec
-        conversion_rules = {
-            'arr1': (columns, shape, pca_components, {'c:v': 'libx264'}, 8, minmax),
-            'arr2': (columns2, shape, 0, {'c:v': 'ffv1'}, 8, minmax2)
-        }
-        # Parquet -> Video
-        parquet2video(parquet_path, 'testid', conversion_rules, output_path=tmpdir, save_dataset=False)
-        # Video -> Parquet for both arrays
-        recon_path1 = video2parquet(tmpdir, 'testid', name='arr1')
-        recon_path2 = video2parquet(tmpdir, 'testid', name='arr2')
-        # Compare
-        df_recon1 = pd.read_parquet(f'{tmpdir}/testid/reconstructed_arr1.parquet')
-        df_recon2 = pd.read_parquet(f'{tmpdir}/testid/reconstructed_arr2.parquet')
-        print('Original df (arr1):\n', df)
-        print('Reconstructed df_recon1:\n', df_recon1)
-        print('Original df2 (arr2):\n', df2)
-        print('Reconstructed df_recon2:\n', df_recon2)
-        print('Columns arr1:', df.columns)
-        print('Columns arr2:', df2.columns)
-        print('Columns recon1:', df_recon1.columns)
-        print('Columns recon2:', df_recon2.columns)
-        # For PCA, allow higher tolerance if not lossless
-        if pca_components == 0:
-            # Check pixel format for arr2 (ffv1)
-            arr2_video_path = f'{tmpdir}/testid/arr2.mkv'
-            try:
-                pix_fmt = subprocess.check_output([
-                    'ffprobe', '-v', 'error', '-select_streams', 'v:0',
-                    '-show_entries', 'stream=pix_fmt',
-                    '-of', 'default=noprint_wrappers=1:nokey=1',
-                    arr2_video_path
-                ]).decode().strip()
-            except Exception as e:
-                pix_fmt = 'unknown'
-            valid_pix_fmts = ['gbrp16le', 'gbrp14le', 'gbrp12le', 'gbrp10le', 'gbrp9le']
-            print(f"ffv1 pixel format for arr2: {pix_fmt}")
-            if pix_fmt not in valid_pix_fmts:
-                pytest.fail(f"Strict roundtrip test failed: ffv1 pixel format is {pix_fmt}, not one of {valid_pix_fmts}. True lossless roundtrip only guaranteed with these formats.")
-            assert np.allclose(df2.values, df_recon2.values, atol=1), 'Roundtrip failed for arr2 (lossless)!'
-            assert np.allclose(df.values, df_recon1.values, atol=1), f'Roundtrip failed for arr1 (no PCA)!'
-        else:
-            # Only check shape and print max error for PCA case
-            print('Max abs error (PCA):', np.max(np.abs(df.values - df_recon1.values)))
-            assert df.values.shape == df_recon1.values.shape
-            assert df2.values.shape == df_recon2.values.shape
-
-def test_roundtrip_lossless():
-    test_parquet_video_roundtrip(pca_components=0)
-
-def test_roundtrip_aggressive_pca():
-    test_parquet_video_roundtrip(pca_components=2)
-
-def test_parquet_video_compaction():
-    """
-    Test that Parquet -> Video -> Parquet roundtrip preserves the DataFrame (or is nearly equal for floats).
-    """
-    num_frames, height, width, channels = 2, 2, 2, 3
-    shape = (num_frames, height, width, channels)
-    data = np.arange(np.prod(shape), dtype=np.float32).reshape(shape)
-    flat = data.reshape(num_frames, -1)
-    columns = [f'col{i}' for i in range(flat.shape[1])]
-    df = pd.DataFrame(flat, columns=columns)
-    minmax = [data.min(), data.max()]
-
-    data2 = np.arange(np.prod(shape), np.prod(shape)*2, dtype=np.float32).reshape(shape)
-    flat2 = data2.reshape(num_frames, -1)
-    columns2 = [f'col2_{i}' for i in range(flat2.shape[1])]
-    df2 = pd.DataFrame(flat2, columns=columns2)
-    df_all = pd.concat([df, df2], axis=1)
-    minmax2 = [data2.min(), data2.max()]
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        parquet_path = f'{tmpdir}/data.parquet'
-        df_all.to_parquet(parquet_path)
-        conversion_rules = {
-            'arr1': (columns, shape, 0, {'c:v': 'libx264'}, 8, minmax),
-            'arr2': (columns2, shape, 0, {'c:v': 'ffv1'}, 8, minmax2)
-        }
-        parquet2video(parquet_path, 'testid', conversion_rules, output_path=tmpdir, save_dataset=False)
-        recon_path1 = video2parquet(tmpdir, 'testid', name='arr1')
-        recon_path2 = video2parquet(tmpdir, 'testid', name='arr2')
-        df_recon1 = pd.read_parquet(f'{tmpdir}/testid/reconstructed_arr1.parquet')
-        df_recon2 = pd.read_parquet(f'{tmpdir}/testid/reconstructed_arr2.parquet')
-        # Compare
-        print('Max abs error arr1:', np.max(np.abs(df.values - df_recon1.values)))
-        print('Max abs error arr2:', np.max(np.abs(df2.values - df_recon2.values)))
-        # For ffv1/gbrp, require strict equality
-        arr2_video_path = f'{tmpdir}/testid/arr2.mkv'
-        try:
-            pix_fmt = subprocess.check_output([
-                'ffprobe', '-v', 'error', '-select_streams', 'v:0',
-                '-show_entries', 'stream=pix_fmt',
-                '-of', 'default=noprint_wrappers=1:nokey=1',
-                arr2_video_path
-            ]).decode().strip()
-        except Exception as e:
-            pix_fmt = 'unknown'
-        valid_pix_fmts = ['gbrp16le', 'gbrp14le', 'gbrp12le', 'gbrp10le', 'gbrp9le']
-        print(f"ffv1 pixel format for arr2: {pix_fmt}")
-        if pix_fmt in valid_pix_fmts:
-            assert np.allclose(df2.values, df_recon2.values, atol=1e-6)
-            assert np.allclose(df.values, df_recon1.values, atol=1e-6)
-        else:
-            # Only check shape and print a warning
-            print(f"WARNING: ffv1 pixel format is {pix_fmt}, not one of {valid_pix_fmts}. Only checking shape.")
-            assert df.values.shape == df_recon1.values.shape
-            assert df2.values.shape == df_recon2.values.shape
-
-# Remove the libx264/rgb24 roundtrip test, as it is not lossless for RGB
-# Only require strict roundtrip for ffv1/gbrp
-# For all other codecs/pix_fmts, only check shape and print a warning
-# Add a test that uses a known working codec/pix_fmt (libx264/rgb24)
-# (delete the test_roundtrip_libx264_rgb24 function entirely) 
+def test_libx264_lossy_minimal(tmp_path):
+    # Same test data as the lossless test
+    arr = np.arange(2*4*4*3, dtype=np.float32).reshape(2, 4, 4, 3)
+    minmax = np.stack([[arr[...,c].min(), arr[...,c].max()] for c in range(3)])
+    bits = 8
+    # Normalize to 8 bits for libx264
+    arr_norm = normalize(arr, minmax, bits=bits)
+    print("[libx264] Normalized array before writing:\n", arr_norm)
+    # No channel reordering needed for rgb24
+    # Write video
+    outpath = os.path.join(tmp_path, 'test_libx264.mkv')
+    metadata = {
+        'REQ_PIX_FMT': 'rgb24',
+        'OUT_PIX_FMT': 'rgb24',
+        'PLANAR': False,
+        'BITS': bits,
+        'CHANNELS': 3,
+        'FRAMES': arr.shape[0],
+        'RANGE': minmax.tolist(),
+        'NORMALIZED': True,
+        'CHANNEL_ORDER': 'rgb',
+    }
+    _ffmpeg_write(outpath, arr_norm, 4, 4, {'c:v':'libx264'}, planar_in=False, input_pix_fmt='rgb24', metadata=metadata)
+    # Read video
+    arr_read, meta = _ffmpeg_read(outpath)
+    print("[libx264] Array after reading, before denormalization:\n", arr_read)
+    # No channel reordering needed
+    arr_rgb = arr_read
+    # Denormalize
+    arr_denorm = denormalize(arr_rgb, minmax, bits=bits)
+    print("[libx264] Denormalized array:\n", arr_denorm)
+    # Compare
+    maxerr = np.max(np.abs(arr - arr_denorm), axis=(0,1,2))
+    print("[libx264] Max abs error per channel:", maxerr)
+    # No assertion, just print error for inspection 

@@ -7,26 +7,55 @@ from sklearn.decomposition import PCA
 
 def normalize(array, minmax, bits=8):
     """
-    Normalize array to [0, 2**bits-1] using minmax (min, max).
+    If array is not uint8, clip array to `minmax` and rescale to [0, 2**bits-1].
+    For bits=8, uint8 is used as output, for bits 9-16, uint16 is used.
+    minmax must have shape (B,2), and array must have shape (...,B)
     """
-    min_val, max_val = minmax
-    scaled = (array - min_val) / (max_val - min_val)
-    scaled = np.clip(scaled, 0, 1)
-    return (scaled * (2**bits - 1)).astype(np.uint16 if bits > 8 else np.uint8)
+    if array.dtype == np.uint8:
+        return array
+    assert bits >=8 and bits <=16, 'Only 8 to 16 bits supported'
+    max_value = 2**bits - 1
+    array_bands = []
+    for c in range(array.shape[-1]):
+        array_c = array[..., c].astype(np.float32)
+        array_c = (array_c - minmax[c, 0]) / (minmax[c, 1] - minmax[c, 0]) * max_value
+        array_c[array_c > max_value] = max_value
+        array_c[array_c < 0] = 0
+        array_c[np.isnan(array_c)] = 0
+        array_bands.append(array_c)
+    arr = np.round(np.stack(array_bands, axis=-1))
+    return arr.astype(np.uint8 if bits == 8 else np.uint16)
 
 def denormalize(array, minmax, bits=8):
     """
-    Denormalize array from [0, 2**bits-1] back to original range using minmax.
+    Transform to float32, and undo the scaling done in `normalize`
+    minmax must have shape (B,2), and array must have shape (...,B)
     """
-    min_val, max_val = minmax
-    scaled = array.astype(np.float32) / (2**bits - 1)
-    return scaled * (max_val - min_val) + min_val
+    max_value = 2**bits - 1
+    array_bands = []
+    for c in range(array.shape[-1]):
+        array_c = array[..., c].astype(np.float32)
+        array_c = array_c / max_value * (minmax[c, 1] - minmax[c, 0]) + minmax[c, 0]
+        array_bands.append(array_c)
+    return np.stack(array_bands, axis=-1)
 
 def is_float(array):
     """
     Check if array dtype is a float type.
     """
     return np.issubdtype(array.dtype, np.floating)
+
+def reorder_coords_axis(array, coords_in, coords_out, axis=-1):
+    """
+    Permute the dimensions within a single axis of an array from coords_in into coords_out.
+    E.g.: axis=-1, coords_in=('r','g','b'), coords_out=('g','b','r')
+    """
+    if coords_in == coords_out:
+        return array
+    new_order = [coords_in.index(i) for i in coords_out]
+    # Move reorder axis to position 0, reorder, and then move it back
+    array_swapped = np.swapaxes(array, axis, 0)[new_order]
+    return np.swapaxes(array_swapped, 0, axis)
 
 class DRWrapper:
     def __init__(self, n_components=None, params=None):
