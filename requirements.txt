@@ -1,4 +1,5 @@
 pyarrow
 pandas
 numpy
-ffmpeg-python 
+ffmpeg-python
+scikit-learn 
