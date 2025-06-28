@@ -27,14 +27,13 @@ def _ffmpeg_write(output_path, array, width, height, params, planar_in=True, inp
     else:
         input_pix_fmt = 'rgb24'
         channel_order = 'rgb'
-    # Only store essential metadata in the video file
-    essential_keys = ['shape', 'minmax', 'columns', 'BITS', 'CHANNELS', 'FRAMES', 'REQ_PIX_FMT', 'OUT_PIX_FMT', 'PLANAR', 'CODEC', 'ext']
-    small_metadata = {k: metadata[k] for k in essential_keys if k in metadata}
+    # Generate a unique XARRAY_ID for this video (e.g., based on output_path)
+    base = os.path.splitext(os.path.basename(str(output_path)))[0]
+    xarray_id = f"XARRAY_{base}"
     params = dict(params)
-    if metadata is not None and metadata != {}:
-        params['metadata'] = f'XARRAY={small_metadata}'
+    params['metadata'] = f'XARRAY_ID={xarray_id}'
     # Store full metadata in a sidecar .json file
-    sidecar_path = str(output_path) + '.json'
+    sidecar_path = f"{output_path}_{xarray_id}.json"
     with open(sidecar_path, 'w') as f:
         json.dump(metadata, f)
     # Define the input pipe
@@ -80,15 +79,16 @@ def _ffmpeg_read(input_path, loglevel='quiet'):
     probe = ffmpeg.probe(str(input_path))
     video_info = next(stream for stream in probe['streams'] if stream['codec_type'] == 'video')
     tags = probe['format'].get('tags', {})
-    # Try to load full metadata from sidecar .json file
-    sidecar_path = str(input_path) + '.json'
-    if os.path.exists(sidecar_path):
+    # Always load full metadata from sidecar .json file using XARRAY_ID
+    if 'XARRAY_ID' in tags:
+        xarray_id = tags['XARRAY_ID']
+        sidecar_path = f"{input_path}_{xarray_id}.json"
+        if not os.path.exists(sidecar_path):
+            raise RuntimeError(f'Missing sidecar metadata file: {sidecar_path}')
         with open(sidecar_path, 'r') as f:
             meta_info = json.load(f)
-    elif 'XARRAY' in tags:
-        meta_info = ast.literal_eval(tags['XARRAY'])
     else:
-        raise RuntimeError('Missing XARRAY metadata in video file and no sidecar .json found.')
+        raise RuntimeError('Missing XARRAY_ID metadata in video file.')
     width = int(video_info['width'])
     height = int(video_info['height'])
     actual_pix_fmt = video_info['pix_fmt']
