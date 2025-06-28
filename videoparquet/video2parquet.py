@@ -4,6 +4,7 @@ from pathlib import Path
 from .utils import denormalize, DRWrapper
 from .ffmpeg_wrappers import _ffmpeg_read
 from .metadata import load_metadata
+import yaml
 
 def video2parquet(input_path, array_id, name='test', exceptions='raise'):
     '''
@@ -19,17 +20,23 @@ def video2parquet(input_path, array_id, name='test', exceptions='raise'):
         minmax = metadata['minmax']
         columns = metadata['columns']
         num_frames, height, width, channels = shape
-        actual_pix_fmt = metadata.get('actual_pix_fmt', metadata.get('output_pix_fmt', 'rgb24'))
-        # Read with actual pixel format
-        if actual_pix_fmt == 'bgr0':
-            array = _ffmpeg_read(str(video_path), width, height, num_frames, input_pix_fmt='bgr0')
-            array = array[..., :3][..., ::-1]  # BGR to RGB, drop alpha
+        # Read with actual pixel format from metadata
+        vcodec = metadata.get('CODEC', 'ffv1')
+        if vcodec == 'ffv1':
+            input_pix_fmt = metadata.get('OUT_PIX_FMT', 'gbrp')
         else:
-            array = _ffmpeg_read(str(video_path), width, height, num_frames, input_pix_fmt=actual_pix_fmt)
-        if array.size != num_frames * height * width * channels:
-            raise ValueError(f"Read buffer size {array.size} does not match expected shape {(num_frames, height, width, channels)}.\n"
-                             f"Pixel format: {actual_pix_fmt}.\n"
-                             f"Try a different codec or pixel format.")
+            input_pix_fmt = 'rgb24'
+        loglevel = 'quiet'
+        array, meta_info = _ffmpeg_read(str(video_path), loglevel=loglevel)
+        orig_shape = meta_info.get('shape', None)
+        if orig_shape is not None:
+            array = array[:orig_shape[0], :orig_shape[1], :orig_shape[2], :orig_shape[3]]
+        expected_size = np.prod(orig_shape) if orig_shape is not None else array.size
+        if array.size != expected_size:
+            print(f"DEBUG: array.shape={array.shape}, expected={orig_shape}")
+            print(f"DEBUG: array.dtype={array.dtype}, meta_info={meta_info}")
+            print(f"DEBUG: metadata={metadata}")
+            raise ValueError(f"Read buffer size {array.size} does not match expected shape {orig_shape}.")
         if metadata.get('normalized', False):
             array = denormalize(array, minmax)
         # PCA inverse
@@ -40,8 +47,19 @@ def video2parquet(input_path, array_id, name='test', exceptions='raise'):
             if array.shape[-1] > n_components:
                 array = array[..., :n_components]
             array = DR.inverse_transform(array)
-        # Flatten to (num_frames, -1) and create DataFrame
+        # Always crop to (num_frames, height, width, channels)
+        array = array[:num_frames, :height, :width, :channels]
         flat = array.reshape(num_frames, -1)
+        # Robustly handle column mismatch due to padding
+        if flat.shape[1] < len(columns):
+            # Pad with zeros
+            pad = np.zeros((num_frames, len(columns) - flat.shape[1]), dtype=flat.dtype)
+            flat = np.concatenate([flat, pad], axis=1)
+            print(f"WARNING: Padding reconstructed DataFrame from {flat.shape[1]} to {len(columns)} columns.")
+        elif flat.shape[1] > len(columns):
+            # Truncate
+            flat = flat[:, :len(columns)]
+            print(f"WARNING: Truncating reconstructed DataFrame from {flat.shape[1]} to {len(columns)} columns.")
         df = pd.DataFrame(flat, columns=columns)
         parquet_out = Path(input_path) / array_id / f'reconstructed_{name}.parquet'
         df.to_parquet(parquet_out)

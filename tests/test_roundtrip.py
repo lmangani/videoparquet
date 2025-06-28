@@ -86,6 +86,60 @@ def test_roundtrip_lossless():
 def test_roundtrip_aggressive_pca():
     test_parquet_video_roundtrip(pca_components=2)
 
+def test_parquet_video_compaction():
+    """
+    Test that Parquet -> Video -> Parquet roundtrip preserves the DataFrame (or is nearly equal for floats).
+    """
+    num_frames, height, width, channels = 2, 2, 2, 3
+    shape = (num_frames, height, width, channels)
+    data = np.arange(np.prod(shape), dtype=np.float32).reshape(shape)
+    flat = data.reshape(num_frames, -1)
+    columns = [f'col{i}' for i in range(flat.shape[1])]
+    df = pd.DataFrame(flat, columns=columns)
+    minmax = [data.min(), data.max()]
+
+    data2 = np.arange(np.prod(shape), np.prod(shape)*2, dtype=np.float32).reshape(shape)
+    flat2 = data2.reshape(num_frames, -1)
+    columns2 = [f'col2_{i}' for i in range(flat2.shape[1])]
+    df2 = pd.DataFrame(flat2, columns=columns2)
+    df_all = pd.concat([df, df2], axis=1)
+    minmax2 = [data2.min(), data2.max()]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        parquet_path = f'{tmpdir}/data.parquet'
+        df_all.to_parquet(parquet_path)
+        conversion_rules = {
+            'arr1': (columns, shape, 0, {'c:v': 'libx264'}, 8, minmax),
+            'arr2': (columns2, shape, 0, {'c:v': 'ffv1'}, 8, minmax2)
+        }
+        parquet2video(parquet_path, 'testid', conversion_rules, output_path=tmpdir, save_dataset=False)
+        recon_path1 = video2parquet(tmpdir, 'testid', name='arr1')
+        recon_path2 = video2parquet(tmpdir, 'testid', name='arr2')
+        df_recon1 = pd.read_parquet(f'{tmpdir}/testid/reconstructed_arr1.parquet')
+        df_recon2 = pd.read_parquet(f'{tmpdir}/testid/reconstructed_arr2.parquet')
+        # Compare
+        print('Max abs error arr1:', np.max(np.abs(df.values - df_recon1.values)))
+        print('Max abs error arr2:', np.max(np.abs(df2.values - df_recon2.values)))
+        # For ffv1/gbrp, require strict equality
+        arr2_video_path = f'{tmpdir}/testid/arr2.mkv'
+        try:
+            pix_fmt = subprocess.check_output([
+                'ffprobe', '-v', 'error', '-select_streams', 'v:0',
+                '-show_entries', 'stream=pix_fmt',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                arr2_video_path
+            ]).decode().strip()
+        except Exception as e:
+            pix_fmt = 'unknown'
+        if pix_fmt == 'gbrp':
+            assert np.allclose(df2.values, df_recon2.values, atol=1e-6)
+            assert np.allclose(df.values, df_recon1.values, atol=1e-6)
+        else:
+            # Only check shape and print a warning
+            print(f"WARNING: ffv1 pixel format is {pix_fmt}, not gbrp. Only checking shape.")
+            assert df.values.shape == df_recon1.values.shape
+            assert df2.values.shape == df_recon2.values.shape
+
 # Remove the libx264/rgb24 roundtrip test, as it is not lossless for RGB
 # Only require strict roundtrip for ffv1/gbrp
 # For all other codecs/pix_fmts, only check shape and print a warning

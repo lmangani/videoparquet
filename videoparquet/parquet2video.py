@@ -7,6 +7,7 @@ from .utils import normalize, denormalize, is_float, DRWrapper
 from .ffmpeg_wrappers import _ffmpeg_write
 from .metadata import save_metadata
 import subprocess
+import yaml
 
 def parquet2video(parquet_path, array_id, conversion_rules, compute_stats=False, include_data_in_stats=False,
                  output_path='./', fmt='auto', loglevel='quiet', exceptions='raise', 
@@ -81,53 +82,49 @@ def parquet2video(parquet_path, array_id, conversion_rules, compute_stats=False,
                 if value_range is None:
                     value_range = [np.nanmin(array), np.nanmax(array)]
                 array = normalize(array, minmax=value_range, bits=bits)
+            # Pad to at least 4x4 for robust ffmpeg roundtrip
+            pad_h = max(0, 4 - array.shape[1])
+            pad_w = max(0, 4 - array.shape[2])
+            if pad_h > 0 or pad_w > 0:
+                array = np.pad(array, ((0, 0), (0, pad_h), (0, pad_w), (0, 0)), mode='constant')
             # Pad to 3 channels if needed
             if array.shape[-1] < 3:
                 pad_width = 3 - array.shape[-1]
                 pad_shape = list(array.shape[:-1]) + [pad_width]
                 pad = np.zeros(pad_shape, dtype=array.dtype)
                 array = np.concatenate([array, pad], axis=-1)
+            orig_shape = list(array.shape)
             # Assume array is (T, H, W, C) and uint8 for now
             # Choose extension based on codec
-            ext = '.mp4' if params.get('c:v', 'libx264') == 'libx264' else '.mkv'
+            ext = '.mkv'
             video_path = output_path / array_id / f'{name}{ext}'
             t0 = time.time()
-            output_pix_fmt = _ffmpeg_write(str(video_path), array, array.shape[2], array.shape[1], params, loglevel=loglevel)
-            # Get actual pixel format from ffprobe
-            try:
-                actual_pix_fmt = subprocess.check_output([
-                    'ffprobe', '-v', 'error', '-select_streams', 'v:0',
-                    '-show_entries', 'stream=pix_fmt',
-                    '-of', 'default=noprint_wrappers=1:nokey=1',
-                    str(video_path)
-                ]).decode().strip()
-                if params.get('c:v', 'libx264') == 'ffv1':
-                    if actual_pix_fmt == 'gbrp':
-                        pass  # All good
-                    elif actual_pix_fmt == 'bgr0':
-                        print("WARNING: ffmpeg encoded ffv1 with bgr0 instead of gbrp. This is common on macOS/Homebrew and some Linux builds. bgr0 may have padding/alpha and is NOT guaranteed to be robust for scientific roundtrip. True lossless roundtrip is only guaranteed with gbrp. See README for details.")
-                    else:
-                        raise RuntimeError(f"ffv1 only supported with gbrp or bgr0 pixel format, got {actual_pix_fmt}. Try a different ffmpeg build or codec.")
-            except Exception as e:
-                raise RuntimeError(f"Could not verify pixel format with ffprobe: {e}")
-            t1 = time.time()
-            # Save metadata (convert numpy types to native types)
+            # Enforce gbrp for ffv1, but allow bgr0 as output
+            vcodec = params.get('c:v', 'libx264')
+            input_pix_fmt = 'gbrp' if vcodec == 'ffv1' else 'rgb24'
+            channel_order = 'gbr' if vcodec == 'ffv1' else 'rgb'
+            # Prepare metadata for XARRAY tag
             metadata = {
                 'shape': list(map(int, array.shape)),
-                'minmax': list(map(float, value_range)),
+                'minmax': list(map(float, value_range)) if value_range is not None else None,
                 'columns': list(map(str, columns)),
                 'name': str(name),
-                'bits': int(bits),
-                'normalized': bool(normalized),
-                'pca_params': pca_params,
-                'ext': ext,
-                'output_pix_fmt': output_pix_fmt,  # Requested
-                'actual_pix_fmt': actual_pix_fmt   # Actual from ffprobe
+                'BITS': int(bits),
+                'CHANNELS': int(array.shape[-1]),
+                'FRAMES': int(array.shape[0]),
+                'REQ_PIX_FMT': input_pix_fmt,
+                'OUT_PIX_FMT': input_pix_fmt,
+                'PLANAR': True if input_pix_fmt == 'gbrp' else False,
+                'CODEC': vcodec,
+                'ext': '.mkv',
             }
+            actual_pix_fmt = _ffmpeg_write(str(video_path), array, array.shape[2], array.shape[1], params, planar_in=(input_pix_fmt=='gbrp'), input_pix_fmt=input_pix_fmt, loglevel=loglevel, metadata=metadata)
+            t1 = time.time()
+            metadata['ACTUAL_PIX_FMT'] = actual_pix_fmt
             meta_path = output_path / array_id / f'{name}.json'
             save_metadata(metadata, meta_path)
             # Stats
-            original_size = array.size * array.itemsize / 2**20  # MB
+            original_size = array.size * array.itemsize / 2**20
             compressed_size = os.stat(video_path).st_size / 2**20  # MB
             compression = compressed_size / original_size if original_size > 0 else None
             bpppb = compressed_size * 2**20 * 8 / array.size if array.size > 0 else None
