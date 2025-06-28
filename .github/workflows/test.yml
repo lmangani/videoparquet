@@ -57,13 +57,17 @@ jobs:
       - name: Install pytest
         run: |
           pip install pytest
-      - name: Download and install static ffmpeg (evermeet.cx)
+      - name: Download and install static ffmpeg and ffprobe (evermeet.cx)
         run: |
           sudo apt-get update && sudo apt-get install -y p7zip-full
-          wget -O ffmpeg-linux.7z https://evermeet.cx/ffmpeg/ffmpeg-120002-gb1172b8cc6.7z
-          7z x ffmpeg-linux.7z -offmpeg-evermeet
-          sudo cp ffmpeg-evermeet/ffmpeg ffmpeg-evermeet/ffprobe /usr/local/bin/
+          wget --trust-server-names https://evermeet.cx/ffmpeg/get/ffmpeg/7z
+          wget --trust-server-names https://evermeet.cx/ffmpeg/get/ffprobe/7z
+          7z x ffmpeg.7z -offmpeg-evermeet
+          7z x ffprobe.7z -offmpeg-evermeet
+          sudo cp ffmpeg-evermeet/ffmpeg /usr/local/bin/
+          sudo cp ffmpeg-evermeet/ffprobe /usr/local/bin/
           ffmpeg -version
+          ffprobe -version
           ffmpeg -h encoder=ffv1 | grep gbrp
       - name: Run tests
         run: |
