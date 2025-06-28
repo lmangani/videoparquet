@@ -30,7 +30,14 @@ jobs:
           pip install pytest
       - name: Install ffmpeg (brew)
         run: |
-          brew install ffmpeg
+          brew uninstall --ignore-dependencies ffmpeg || true
+          curl -L -o ffmpeg.7z https://evermeet.cx/ffmpeg/ffmpeg-120002-gb1172b8cc6.7z
+          7z x ffmpeg.7z
+          chmod +x ffmpeg ffprobe
+          sudo mv ffmpeg /usr/local/bin/ffmpeg
+          sudo mv ffprobe /usr/local/bin/ffprobe
+          ffmpeg -version
+          ffmpeg -h encoder=ffv1 | grep gbrp
       - name: Run tests
         run: |
           pytest tests/
