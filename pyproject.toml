@@ -1,0 +1,51 @@
+[project]
+name = "videoparquet"
+version = "0.1.1"
+description = "Convert Parquet files to video and back, inspired by xarrayvideo"
+readme = "README.md"
+requires-python = ">=3.7"
+authors = [
+    { name = "Your Name", email = "your.email@example.com" }
+]
+license = { text = "MIT" }
+keywords = ["parquet", "video", "ffmpeg", "scientific-data", "compression"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Multimedia :: Video",
+    "Development Status :: 3 - Alpha"
+]
+dependencies = [
+    "pyarrow",
+    "pandas",
+    "numpy",
+    "ffmpeg-python",
+    "scikit-learn"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "twine",
+    "build"
+]
+
+[project.urls]
+Documentation = "https://github.com/yourusername/videoparquet"
+Source = "https://github.com/yourusername/videoparquet"
+Tracker = "https://github.com/yourusername/videoparquet/issues"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# Only include the main package, not tests or xarrayvideo
+packages = { find = { where = ["videoparquet"] } }
+
+[tool.setuptools.package-data]
+# Include any non-Python files in the package if needed
+videoparquet = ["*.py"] 
