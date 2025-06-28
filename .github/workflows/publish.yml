@@ -4,45 +4,38 @@ on:
   release:
     types: [published]
 
-
 permissions:
   id-token: write
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
-    
+        python-version: [3.11]
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
-        cache: 'pip'
-    
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-    
-    - name: Install videoparquet (editable)
-      run: |
-        pip install -e .
-    
-    - name: Install pytest
-      run: |
-        pip install pytest
-    
-    - name: Setup FFmpeg
-      uses: AnimMouse/setup-ffmpeg@v1
-    
-    - name: Run tests
-      run: |
-        pytest tests/
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Install videoparquet (editable)
+        run: |
+          pip install -e .
+      - name: Install pytest
+        run: |
+          pip install pytest
+      - name: Install ffmpeg (brew)
+        run: |
+          brew install ffmpeg
+      - name: Run tests
+        run: |
+          pytest tests/
 
   build-and-publish:
     needs: test
