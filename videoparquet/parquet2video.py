@@ -7,7 +7,6 @@ from .utils import normalize, denormalize, is_float, DRWrapper
 from .ffmpeg_wrappers import _ffmpeg_write
 from .metadata import save_metadata
 import subprocess
-import yaml
 
 def parquet2video(parquet_path, array_id, conversion_rules, compute_stats=False, include_data_in_stats=False,
                  output_path='./', fmt='auto', loglevel='quiet', exceptions='raise', 

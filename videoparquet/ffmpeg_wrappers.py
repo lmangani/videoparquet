@@ -5,7 +5,6 @@ Only supports ffv1 with 'gbrp' (planar RGB, 3 channels, no padding) for robust r
 
 import ffmpeg
 import numpy as np
-import yaml
 import ast
 
 def _ffmpeg_write(output_path, array, width, height, params, planar_in=True, input_pix_fmt='gbrp', loglevel='quiet', metadata=None):
@@ -71,7 +70,6 @@ def _ffmpeg_read(input_path, loglevel='quiet'):
     Assumes output is uint8.
     Raises an error if the pixel format is not supported.
     """
-    import yaml
     import numpy as np
     import ffmpeg
     probe = ffmpeg.probe(str(input_path))

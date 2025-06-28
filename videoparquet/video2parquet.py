@@ -4,7 +4,6 @@ from pathlib import Path
 from .utils import denormalize, DRWrapper
 from .ffmpeg_wrappers import _ffmpeg_read
 from .metadata import load_metadata
-import yaml
 
 def video2parquet(input_path, array_id, name='test', exceptions='raise'):
     '''
