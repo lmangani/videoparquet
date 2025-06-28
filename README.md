@@ -85,6 +85,12 @@ This project enables efficient storage, compression, and sharing of large datase
 
 Other codecs (e.g., `libx264`) may be used for lossy compression, but roundtrip is not guaranteed.
 
+## 🚀 Benchmark Highlights
+- Achieve up to **25x compression** over Parquet for timeseries/tabular data using video codecs (ffv1/gbrp)
+- **Fast encoding/decoding**: Video roundtrip in under a second for typical scientific arrays
+- **Lossless roundtrip** supported (with ffv1/gbrp and compatible ffmpeg)
+- See [BENCHMARK.md](BENCHMARK.md) for details and reproducibility
+
 ## Benchmarking
 
 See [BENCHMARK.md](BENCHMARK.md) for a summary of benchmark results comparing Parquet and video-based storage for timeseries/tabular data. This includes size, compression ratio, and performance metrics for scientific reproducibility. 
