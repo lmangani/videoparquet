@@ -70,8 +70,10 @@ def test_parquet_video_roundtrip(pca_components=0):
                 ]).decode().strip()
             except Exception as e:
                 pix_fmt = 'unknown'
-            if pix_fmt != 'gbrp':
-                pytest.skip(f"Skipping strict roundtrip test: ffv1 pixel format is {pix_fmt}, not gbrp. True lossless roundtrip only guaranteed with gbrp.")
+            valid_pix_fmts = ['gbrp16le', 'gbrp14le', 'gbrp12le', 'gbrp10le', 'gbrp9le']
+            print(f"ffv1 pixel format for arr2: {pix_fmt}")
+            if pix_fmt not in valid_pix_fmts:
+                pytest.fail(f"Strict roundtrip test failed: ffv1 pixel format is {pix_fmt}, not one of {valid_pix_fmts}. True lossless roundtrip only guaranteed with these formats.")
             assert np.allclose(df2.values, df_recon2.values, atol=1), 'Roundtrip failed for arr2 (lossless)!'
             assert np.allclose(df.values, df_recon1.values, atol=1), f'Roundtrip failed for arr1 (no PCA)!'
         else:
@@ -131,12 +133,14 @@ def test_parquet_video_compaction():
             ]).decode().strip()
         except Exception as e:
             pix_fmt = 'unknown'
-        if pix_fmt == 'gbrp':
+        valid_pix_fmts = ['gbrp16le', 'gbrp14le', 'gbrp12le', 'gbrp10le', 'gbrp9le']
+        print(f"ffv1 pixel format for arr2: {pix_fmt}")
+        if pix_fmt in valid_pix_fmts:
             assert np.allclose(df2.values, df_recon2.values, atol=1e-6)
             assert np.allclose(df.values, df_recon1.values, atol=1e-6)
         else:
             # Only check shape and print a warning
-            print(f"WARNING: ffv1 pixel format is {pix_fmt}, not gbrp. Only checking shape.")
+            print(f"WARNING: ffv1 pixel format is {pix_fmt}, not one of {valid_pix_fmts}. Only checking shape.")
             assert df.values.shape == df_recon1.values.shape
             assert df2.values.shape == df_recon2.values.shape
 
