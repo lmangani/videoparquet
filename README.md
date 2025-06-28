@@ -93,4 +93,36 @@ Other codecs (e.g., `libx264`) may be used for lossy compression, but roundtrip 
 
 ## Benchmarking
 
-See [BENCHMARK.md](BENCHMARK.md) for a summary of benchmark results comparing Parquet and video-based storage for timeseries/tabular data. This includes size, compression ratio, and performance metrics for scientific reproducibility. 
+See [BENCHMARK.md](BENCHMARK.md) for a summary of benchmark results comparing Parquet and video-based storage for timeseries/tabular data. This includes size, compression ratio, and performance metrics for scientific reproducibility.
+
+## ⚠️ ffmpeg, ffv1, and Pixel Format Limitations
+
+**IMPORTANT:**
+
+- For true lossless roundtrip and compression, `videoparquet` requires ffmpeg to encode `ffv1` videos with the `gbrp` (planar RGB) pixel format.
+- On macOS (Homebrew) and many Linux builds, ffmpeg will encode `ffv1` as `bgr0` instead of `gbrp`, even though `gbrp` is listed as supported. This is a known limitation/quirk of many ffmpeg builds.
+- `bgr0` is not true planar RGB and may have padding/alpha issues. It is **not guaranteed to be robust for scientific roundtrip**.
+- The test suite will **skip strict roundtrip and compression tests** if `gbrp` is not available, and will warn the user. Only platforms with `ffv1/gbrp` will run and require these tests to pass.
+- To check your ffmpeg's pixel format support for ffv1, run:
+
+  ```sh
+  ffmpeg -h encoder=ffv1 | grep gbrp
+  ```
+
+- For scientific reproducibility, use a Docker image or reference ffmpeg build known to support `ffv1/gbrp`.
+
+### How to Check Your ffmpeg
+
+Run this command:
+
+```sh
+ffmpeg -f lavfi -i testsrc2=duration=1:size=2x2:rate=1 -pix_fmt gbrp -c:v ffv1 -y test_ffv1_gbrp.mkv && ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=noprint_wrappers=1:nokey=1 test_ffv1_gbrp.mkv
+```
+
+- If the output is `gbrp`, your ffmpeg is suitable for scientific roundtrip.
+- If the output is `bgr0`, your ffmpeg will not guarantee true lossless roundtrip.
+
+### For Scientific Reproducibility
+
+- Use a reference ffmpeg build (e.g., static Linux build from https://johnvansickle.com/ffmpeg/) or a Docker container with a known-good ffmpeg.
+- See the code and error messages for more details. 

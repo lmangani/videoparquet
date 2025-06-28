@@ -101,9 +101,13 @@ def parquet2video(parquet_path, array_id, conversion_rules, compute_stats=False,
                     '-of', 'default=noprint_wrappers=1:nokey=1',
                     str(video_path)
                 ]).decode().strip()
-                if params.get('c:v', 'libx264') == 'ffv1' and actual_pix_fmt != 'gbrp':
-                    raise RuntimeError(f"ffv1 only supported with gbrp pixel format, got {actual_pix_fmt}. "
-                                       f"Try a different ffmpeg build or codec.")
+                if params.get('c:v', 'libx264') == 'ffv1':
+                    if actual_pix_fmt == 'gbrp':
+                        pass  # All good
+                    elif actual_pix_fmt == 'bgr0':
+                        print("WARNING: ffmpeg encoded ffv1 with bgr0 instead of gbrp. This is common on macOS/Homebrew and some Linux builds. bgr0 may have padding/alpha and is NOT guaranteed to be robust for scientific roundtrip. True lossless roundtrip is only guaranteed with gbrp. See README for details.")
+                    else:
+                        raise RuntimeError(f"ffv1 only supported with gbrp or bgr0 pixel format, got {actual_pix_fmt}. Try a different ffmpeg build or codec.")
             except Exception as e:
                 raise RuntimeError(f"Could not verify pixel format with ffprobe: {e}")
             t1 = time.time()

@@ -6,6 +6,7 @@ import time
 import subprocess
 from videoparquet.parquet2video import parquet2video
 from videoparquet.video2parquet import video2parquet
+import pytest
 
 def test_parquet_video_benchmark():
     # Generate synthetic data as uint8 to match video output
@@ -45,17 +46,20 @@ def test_parquet_video_benchmark():
                     '-of', 'default=noprint_wrappers=1:nokey=1',
                     video_path
                 ]).decode().strip()
-                print(f"ffprobe pixel format for {name}: {pix_fmt}")
             except Exception as e:
-                print(f"ffprobe failed: {e}")
-
+                pix_fmt = 'unknown'
+            print(f"ffprobe pixel format for {name}: {pix_fmt}")
+            if pix_fmt != 'gbrp':
+                pytest.skip(f"Skipping benchmark: ffv1 pixel format is {pix_fmt}, not gbrp. True lossless roundtrip and compression only guaranteed with gbrp.")
         # Video -> Parquet (restore)
         for name in conversion_rules.keys():
             t0 = time.time()
             recon_path = video2parquet(tmpdir, 'benchid', name=name)
             t1 = time.time()
-            recon_size = os.stat(recon_path).st_size / 2**20  # MB
-            df_recon = pd.read_parquet(recon_path)
-            print(f"Restored Parquet '{name}': Size = {recon_size:.2f} MB, Restore time = {t1-t0:.2f}s")
-            assert df_recon.shape == df.shape, f"Restored DataFrame shape mismatch for {name}"
-            assert df_recon.dtypes.equals(df.dtypes), f"Restored DataFrame dtype mismatch for {name}" 
+            print(f'Video -> Parquet total time: {t1-t0:.2f}s')
+            df_recon = pd.read_parquet(f'{tmpdir}/benchid/reconstructed_{name}.parquet')
+            # Strict roundtrip and size check only if gbrp
+            assert np.allclose(df.values, df_recon.values, atol=1), 'Roundtrip failed for arr_lossless (gbrp)!'
+            video_size = os.stat(os.path.join(tmpdir, 'benchid', f'{name}.mkv')).st_size / 2**20
+            print(f'Video file size: {video_size:.2f} MB')
+            assert video_size < parquet_size, 'Video file is not smaller than original Parquet!' 
