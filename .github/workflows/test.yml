@@ -7,7 +7,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     strategy:
       matrix:
         python-version: [3.11]
@@ -27,11 +27,9 @@ jobs:
       - name: Install pytest
         run: |
           pip install pytest
-      - name: Install full-featured ffmpeg (PPA)
+      - name: Install ffmpeg (brew)
         run: |
-          sudo add-apt-repository ppa:savoury1/ffmpeg4 -y
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          brew install ffmpeg
       - name: Run tests
         run: |
           pytest tests/ 
