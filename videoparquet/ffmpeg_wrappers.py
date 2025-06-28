@@ -6,6 +6,8 @@ Only supports ffv1 with 'gbrp' (planar RGB, 3 channels, no padding) for robust r
 import ffmpeg
 import numpy as np
 import ast
+import json
+import os
 
 def _ffmpeg_write(output_path, array, width, height, params, planar_in=True, input_pix_fmt='gbrp', loglevel='quiet', metadata=None):
     """
@@ -15,7 +17,6 @@ def _ffmpeg_write(output_path, array, width, height, params, planar_in=True, inp
     Returns the output pixel format used.
     Raises an error if ffprobe reports a different pixel format.
     """
-    import subprocess
     assert array.dtype == np.uint8, 'Only uint8 supported for now.'
     assert array.shape[-1] == 3, 'Only 3-channel (RGB) supported for now.'
     vcodec = params.get('c:v', 'libx264')
@@ -26,10 +27,16 @@ def _ffmpeg_write(output_path, array, width, height, params, planar_in=True, inp
     else:
         input_pix_fmt = 'rgb24'
         channel_order = 'rgb'
-    # Store metadata as XARRAY tag (Python dict string, not YAML)
+    # Only store essential metadata in the video file
+    essential_keys = ['shape', 'minmax', 'columns', 'BITS', 'CHANNELS', 'FRAMES', 'REQ_PIX_FMT', 'OUT_PIX_FMT', 'PLANAR', 'CODEC', 'ext']
+    small_metadata = {k: metadata[k] for k in essential_keys if k in metadata}
     params = dict(params)
     if metadata is not None and metadata != {}:
-        params['metadata'] = f'XARRAY={metadata}'
+        params['metadata'] = f'XARRAY={small_metadata}'
+    # Store full metadata in a sidecar .json file
+    sidecar_path = str(output_path) + '.json'
+    with open(sidecar_path, 'w') as f:
+        json.dump(metadata, f)
     # Define the input pipe
     input_pipe = ffmpeg.input('pipe:', format='rawvideo', pix_fmt=input_pix_fmt, s=f'{width}x{height}', framerate=30)
     process = (
@@ -70,14 +77,18 @@ def _ffmpeg_read(input_path, loglevel='quiet'):
     Assumes output is uint8.
     Raises an error if the pixel format is not supported.
     """
-    import numpy as np
-    import ffmpeg
     probe = ffmpeg.probe(str(input_path))
     video_info = next(stream for stream in probe['streams'] if stream['codec_type'] == 'video')
     tags = probe['format'].get('tags', {})
-    if 'XARRAY' not in tags:
-        raise RuntimeError('Missing XARRAY metadata in video file.')
-    meta_info = ast.literal_eval(tags['XARRAY'])
+    # Try to load full metadata from sidecar .json file
+    sidecar_path = str(input_path) + '.json'
+    if os.path.exists(sidecar_path):
+        with open(sidecar_path, 'r') as f:
+            meta_info = json.load(f)
+    elif 'XARRAY' in tags:
+        meta_info = ast.literal_eval(tags['XARRAY'])
+    else:
+        raise RuntimeError('Missing XARRAY metadata in video file and no sidecar .json found.')
     width = int(video_info['width'])
     height = int(video_info['height'])
     actual_pix_fmt = video_info['pix_fmt']
