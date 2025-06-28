@@ -1,6 +1,10 @@
+<img src="https://github.com/user-attachments/assets/eca17ccf-4e9f-425d-b6a7-fbca8b47da94" width=150 />
+
 # videoparquet
 
 Inspired by xarrayvideo, **videoparquet** is a Python library for converting Parquet files (containing array-like or tabular data) to video files and back, using ffmpeg and advanced data handling techniques.
+
+> THIS IS JUST A FUN EXPERIMENT! DO NOT TAKE IT TOO SERIOUSLY ⚠️
 
 ## Features
 - Convert Parquet files to video (mp4/mkv) using ffmpeg codecs (lossy or lossless)
