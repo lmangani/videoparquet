@@ -13,6 +13,8 @@ jobs:
         python-version: [3.11]
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: .
       - name: Print working directory and files
         run: |
           pwd
@@ -41,19 +43,18 @@ jobs:
 
   test-linux:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: [3.11]
     steps:
       - uses: actions/checkout@v4
       - name: Print working directory and files
         run: |
           pwd
           ls -l
-      - name: Set up Python ${{ matrix.python-version }}
+          ls -l videoparquet
+          ls -l tests
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.11"
           cache: 'pip'
       - name: Install dependencies
         run: |

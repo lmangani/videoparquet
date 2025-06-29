@@ -43,8 +43,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-# Only include the main package, not tests or xarrayvideo
-packages = { find = { where = ["videoparquet"] } }
+packages = { find = { where = ["."] } }
 
 [tool.setuptools.package-data]
 # Include any non-Python files in the package if needed
