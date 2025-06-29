@@ -96,7 +96,6 @@ Other codecs (e.g., `libx264`) may be used for lossy compression, but roundtrip 
 - Achieve up to **25x compression** over Parquet for timeseries/tabular data using video codecs (ffv1/gbrp16le)
 - **Fast encoding/decoding**: Video roundtrip in under a second for typical scientific arrays
 - **Lossless roundtrip** supported (with ffv1/gbrp16le and compatible ffmpeg)
-- See [BENCHMARK.md](BENCHMARK.md) for details and reproducibility
 
 ## Benchmarking
 
