@@ -128,8 +128,3 @@ ffmpeg -f lavfi -i testsrc2=duration=1:size=2x2:rate=1 -pix_fmt gbrp16le -c:v ff
 - If the output is `gbrp16le`, your ffmpeg is suitable for scientific roundtrip.
 - If the output is `bgr0`, your ffmpeg will not guarantee true lossless roundtrip.
 
-### For Scientific Reproducibility & CI
-
-- Use a reference ffmpeg build (e.g., static Linux build from https://johnvansickle.com/ffmpeg/) or a Docker container with a known-good ffmpeg.
-- The test suite is designed to run in CI (GitHub Actions) as long as the correct ffmpeg build is available.
-- See the code and error messages for more details. 
