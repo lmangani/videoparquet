@@ -2,7 +2,7 @@
 
 # videoparquet
 
-Inspired by [xarrayvideo](https://github.com/IPL-UV/xarrayvideo), **videoparquet** is a Python library for converting Parquet files (containing array-like or tabular data) to video files and back, using ffmpeg and advanced data handling techniques.
+Inspired by [xarrayvideo](https://github.com/IPL-UV/xarrayvideo) and its accompanying paper [^1], **videoparquet** is a Python library for converting Parquet files (containing array-like or tabular data) to video files and back, using ffmpeg and advanced data handling techniques.
 
 > THIS IS JUST A FUN EXPERIMENT! DO NOT TAKE IT TOO SERIOUSLY ⚠️
 
@@ -127,4 +127,9 @@ ffmpeg -f lavfi -i testsrc2=duration=1:size=2x2:rate=1 -pix_fmt gbrp16le -c:v ff
 
 - If the output is `gbrp16le`, your ffmpeg is suitable for scientific roundtrip.
 - If the output is `bgr0`, your ffmpeg will not guarantee true lossless roundtrip.
+
+## Citations
+[^1]: Pellicer-Valero, O. J., Aybar, C., & Camps-Valls, G. (2025). Video compression for spatiotemporal Earth system data. arXiv. https://doi.org/10.48550/arXiv.2506.19656
+
+
 
