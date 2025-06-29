@@ -24,22 +24,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-        working-directory: ../..
       - name: Install videoparquet (editable)
         run: |
           pip install -e .
-        working-directory: ../..
       - name: Install pytest
         run: |
           pip install pytest
-        working-directory: ../..
       - name: Install ffmpeg (brew)
         run: |
           brew install ffmpeg
       - name: Run tests
         run: |
           pytest tests/
-        working-directory: ../..
 
   build-and-publish:
     needs: test
@@ -56,11 +52,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install build twine
-        working-directory: ../..
       - name: Build package
         run: |
           python -m build
-        working-directory: ../..
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
