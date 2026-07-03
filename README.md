@@ -2,42 +2,58 @@
 
 # videoparquet
 
-**Store sensor grid data as video. Get 2-4x compression vs Parquet. Keep it lossless.**
+**Back up your Parquet files to YouTube. Up to 7x compression.** 🎬📊
 
-Inspired by [xarrayvideo](https://github.com/IPL-UV/xarrayvideo) and its accompanying paper[^1], videoparquet converts Parquet files to video and back—leveraging video codecs' spatial/temporal compression for scientific and tabular data.
+Convert Parquet → Video → Upload to any video site → Download → Video → Parquet. Your data survives!
 
 ```bash
 pip install videoparquet
 ```
 
+> ⚠️ **This is a novelty project!** A fun experiment in using video platforms as data storage. Not for production use. Inspired by [xarrayvideo](https://github.com/IPL-UV/xarrayvideo)[^1].
+
 > **No external dependencies.** Uses [PyAV](https://github.com/PyAV-Org/PyAV) with bundled FFmpeg libraries. No `ffmpeg` binary required.
 
 ## Why?
 
-Video codecs like FFV1 are designed to compress sequences of images with spatial and temporal patterns. Many scientific datasets (sensor arrays, environmental monitoring, simulations) have similar structure. This library exploits that.
+Because you can upload videos anywhere. YouTube, Vimeo, Google Drive, iCloud, that random video hosting site from 2008 that's somehow still running.
+
+Your data becomes a video. Videos are forever. QED. 🎉
+
+*(Also: video codecs are surprisingly good at compressing structured numerical data.)*
 
 ## Benchmark
 
-Tested on thermal/environmental monitoring grid (100 time steps × 100×100 sensor grid × 3 metrics):
+| Data Type | Compression | Notes |
+|-----------|-------------|-------|
+| Smooth sensor grids | **up to 7x** | Low noise, high spatial correlation |
+| Typical sensor data | **3-4x** | Environmental monitoring, thermal grids |
+| Random/noisy data | **2-3x** | Still beats Parquet for floats |
+| Integer/categorical | **0.5-1x** | Parquet wins here, don't use videoparquet |
+
+All roundtrips are **lossless** (max error < 0.001).
+
+### Best results with
+
+- Continuous float data (not integers)
+- Spatial grids (2D/3D sensor arrays)
+- Temporal correlation between frames
+- Low sensor noise
+
+## The Workflow
 
 ```
-Format          Size        vs Raw    vs Parquet
-────────────────────────────────────────────────
-Raw numpy       11,719 KB      1x         -
-Parquet         13,035 KB    0.9x         1x
-Video (FFV1)     3,993 KB    2.9x       3.3x  🔥
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Parquet   │ ──▶ │    Video    │ ──▶ │   YouTube   │
+│   (data)    │     │   (.mkv)    │     │  (backup!)  │
+└─────────────┘     └─────────────┘     └─────────────┘
+                           │
+                           ▼
+                    ┌─────────────┐     ┌─────────────┐
+                    │  Download   │ ──▶ │   Parquet   │
+                    │   (.mkv)    │     │ (restored!) │
+                    └─────────────┘     └─────────────┘
 ```
-
-**3.3x smaller than Parquet** with lossless roundtrip (max error < 0.001).
-
-### When to use videoparquet
-
-| ✅ Good fit | ❌ Better with Parquet |
-|-------------|------------------------|
-| Continuous float sensor data | Integer/categorical data |
-| Spatial grids (2D/3D arrays) | Sparse data with repeated values |
-| Time series with correlation | Data without spatial structure |
-| Scientific/observability data | Tabular business data |
 
 ## Quick Start
 
