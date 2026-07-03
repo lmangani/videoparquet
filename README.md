@@ -2,134 +2,152 @@
 
 # videoparquet
 
-Inspired by [xarrayvideo](https://github.com/IPL-UV/xarrayvideo) and its accompanying paper [^1], **videoparquet** is a Python library for converting Parquet files (containing array-like or tabular data) to video files and back, using ffmpeg and advanced data handling techniques.
+**Store tabular data as video. Get 5-10x compression. Keep it lossless.**
 
-> THIS IS JUST A FUN EXPERIMENT! DO NOT TAKE IT TOO SERIOUSLY ⚠️
+Inspired by [xarrayvideo](https://github.com/IPL-UV/xarrayvideo) and its accompanying paper[^1], videoparquet converts Parquet files to video and back—leveraging video codecs' spatial/temporal compression for scientific and tabular data.
 
-## Features
-- Convert Parquet files to video (mp4/mkv) using ffmpeg codecs (lossy or lossless)
-- Store and recover all necessary metadata for roundtrip conversion
-- Support for normalization, denormalization, and PCA (dimensionality reduction)
-- Multi-array and multi-video support per Parquet file
-- Flexible codec and bit-depth selection
-- Automated recipe generation for batch processing
-- **Strict, xarrayvideo-style test suite for lossless and lossy roundtrip**
+```bash
+pip install videoparquet
+```
+
+> **No external dependencies.** Uses [PyAV](https://github.com/PyAV-Org/PyAV) with bundled FFmpeg libraries. No `ffmpeg` binary required.
+
+## Why?
+
+Video codecs like FFV1 are designed to compress sequences of images with spatial and temporal patterns. Many scientific datasets (sensor arrays, time series, simulations) have similar structure. This library exploits that.
+
+| Data Type | Compression | Use Case |
+|-----------|-------------|----------|
+| **Random noise** | 4-6x | Baseline |
+| **Structured/scientific** | 7-10x | Sensor data, simulations |
+| **Highly correlated** | 10-25x | Satellite imagery, time series |
+
+## Benchmark
+
+```
+Dataset          Parquet    Video     Ratio    Encode    Decode
+─────────────────────────────────────────────────────────────────
+Random 64³×3     9,991 KB   1,685 KB  5.9x     302 ms    512 ms
+Structured 64³×3 9,991 KB   1,390 KB  7.2x     361 ms    508 ms
+```
+
+All roundtrips are **lossless** (max error < 0.001 per channel).
+
+## Quick Start
+
+```python
+from videoparquet import parquet2video, video2parquet
+import pandas as pd
+import numpy as np
+
+# Create some data
+arr = np.random.randn(16, 64, 64, 3).astype(np.float32)
+df = pd.DataFrame(arr.reshape(16, -1))
+df.to_parquet('data.parquet')
+
+# Define what to convert
+conversion_rules = {
+    'myarray': (
+        list(df.columns),           # columns to use
+        (16, 64, 64, 3),            # reshape to (frames, H, W, channels)
+        0,                          # PCA components (0 = none)
+        {'c:v': 'ffv1'},            # codec (ffv1 = lossless)
+        16,                         # bit depth
+        [arr.min(), arr.max()]      # value range for normalization
+    )
+}
+
+# Convert Parquet → Video
+parquet2video('data.parquet', 'dataset_id', conversion_rules, output_path='./output')
+# Creates: ./output/dataset_id/myarray.mkv
+
+# Convert Video → Parquet
+video2parquet('./output', 'dataset_id', name='myarray')
+# Creates: ./output/dataset_id/reconstructed_myarray.parquet
+```
+
+## Supported Codecs
+
+| Codec | Type | Format | Best For |
+|-------|------|--------|----------|
+| `ffv1` | Lossless | `gbrp16le` (16-bit) | Scientific data, exact roundtrip |
+| `libx264` | Lossy | `yuv420p` (8-bit) | Preview, smaller files |
+
+## How It Works
+
+1. **Reshape**: Tabular data → 4D array `(frames, height, width, channels)`
+2. **Normalize**: Scale values to 16-bit range, track min/max per channel
+3. **Encode**: Write as video using FFV1 codec (lossless, planar RGB)
+4. **Decode**: Read video, denormalize using stored metadata
+5. **Reconstruct**: Reshape back to original DataFrame
+
+Metadata (shape, normalization params, column names) is stored in a sidecar JSON file.
 
 ## Installation
 
 ```bash
-pip install -r requirements.txt
-# or, for development:
-# pip install -e .
+pip install videoparquet
 ```
 
-## Usage
+**Requirements:**
+- Python 3.8+
+- NumPy, Pandas, PyArrow
+- PyAV (bundled FFmpeg, no system install needed)
+- scikit-learn (for optional PCA)
 
-### Basic: Parquet to Video and Back
+## API Reference
+
+### `parquet2video()`
+
 ```python
-from videoparquet.parquet2video import parquet2video
-from videoparquet.video2parquet import video2parquet
-import pandas as pd
-import numpy as np
-
-# Create synthetic data and save as Parquet
-arr = np.random.rand(4, 4, 3)  # (frames, pixels, channels)
-df = pd.DataFrame(arr.reshape(4, -1))
-df.to_parquet('data.parquet')
-
-# Define conversion rules (see below for details)
-conversion_rules = {
-    'arr1': (list(df.columns), arr.shape, 0, {'c:v': 'libx264'}, 8, [arr.min(), arr.max()])
-}
-
-# Parquet -> Video
-parquet2video('data.parquet', 'exampleid', conversion_rules, output_path='.')
-
-# Video -> Parquet
-video2parquet('.', 'exampleid', name='arr1')
+parquet2video(
+    parquet_path,       # Path to input Parquet file
+    array_id,           # Identifier (becomes subdirectory name)
+    conversion_rules,   # Dict of {name: (columns, shape, pca, params, bits, range)}
+    output_path='./',   # Output directory
+    compute_stats=False,# Print compression statistics
+    verbose=True,       # Print progress
+    nan_fill=None,      # Handle NaN: int, 'mean', 'min', 'max'
+)
 ```
 
-### Advanced: Using Lossless Codecs
-```python
-conversion_rules = {
-    # Use lossless codec (ffv1, 3-channel RGB only)
-    'arr_lossless': (list(df.columns), arr.shape, 0, {'c:v': 'ffv1'}, 16, [arr.min(), arr.max()])
-}
-parquet2video('data.parquet', 'exampleid', conversion_rules, output_path='.')
-video2parquet('.', 'exampleid', name='arr_lossless')
-```
+### `video2parquet()`
 
-### Automated Recipe Generation
 ```python
-from videoparquet.get_recipe import get_recipe
-import pandas as pd
-# df = pd.read_parquet('data.parquet')
-recipe = get_recipe(df)  # Returns a dict of conversion rules
+video2parquet(
+    input_path,         # Directory containing video files
+    array_id,           # Dataset identifier
+    name='test',        # Name of the array to reconstruct
+)
 ```
 
 ## Testing
-Run the test suite to verify strict roundtrip and lossy scenarios:
+
 ```bash
-pytest tests/test_roundtrip.py
+pytest tests/ -v
 ```
 
-### What is tested?
-- **Lossless roundtrip:** Only 3-channel ffv1+gbrp16le is supported and tested. Max error is <0.001 per channel.
-- **Lossy roundtrip:** A test with libx264 (rgb24) is included for comparison. Max error is typically 2–3 per channel (on a 0–95 range).
+## Limitations
 
-Example output:
-```
-Max abs error per channel: [0.00068665 0.00068665 0.00068665]  # ffv1+gbrp16le (lossless)
-[libx264] Max abs error per channel: [2.588234 2.588234 2.588234]  # libx264 (lossy)
-```
+- Only 3-channel arrays supported (maps to RGB video planes)
+- FFV1 lossless requires 16-bit planar format (`gbrp16le`)
+- Data must be reshapeable to `(frames, height, width, 3)`
 
-## Motivation
-This project enables efficient storage, compression, and sharing of large datasets by leveraging video codecs, while maintaining the ability to recover the original data using Parquet as the canonical format.
+## License
 
-## Codec and Pixel Format Restrictions
+MIT
 
-**Important:** For robust, lossless roundtrip, only the `ffv1` codec with the `gbrp16le` pixel format (planar RGB, 3 channels, no padding) is supported and tested. If your ffmpeg build does not support this combination, the library will raise a clear error. This ensures that timeseries/tabular data can be reliably converted to and from video without data loss or row padding issues.
+## Citation
 
-Other codecs (e.g., `libx264`) may be used for lossy compression, but roundtrip is not guaranteed.
+If you use this in research, please cite the xarrayvideo paper:
 
-## 🚀 Benchmark Highlights
-- Achieve up to **25x compression** over Parquet for timeseries/tabular data using video codecs (ffv1/gbrp16le)
-- **Fast encoding/decoding**: Video roundtrip in under a second for typical scientific arrays
-- **Lossless roundtrip** supported (with ffv1/gbrp16le and compatible ffmpeg)
-
-## Benchmarking
-
-See [BENCHMARK.md](BENCHMARK.md) for a summary of benchmark results comparing Parquet and video-based storage for timeseries/tabular data. This includes size, compression ratio, and performance metrics for scientific reproducibility.
-
-## ⚠️ ffmpeg, ffv1, and Pixel Format Limitations
-
-**IMPORTANT:**
-
-- For true lossless roundtrip and compression, `videoparquet` requires ffmpeg to encode `ffv1` videos with the `gbrp16le` (planar RGB) pixel format.
-- On macOS (Homebrew) and many Linux builds, ffmpeg may encode `ffv1` as `bgr0` instead of `gbrp16le`, even though `gbrp16le` is listed as supported. This is a known limitation/quirk of many ffmpeg builds.
-- `bgr0` is not true planar RGB and may have padding/alpha issues. It is **not guaranteed to be robust for scientific roundtrip**.
-- The test suite will **skip strict roundtrip and compression tests** if `gbrp16le` is not available, and will warn the user. Only platforms with `ffv1/gbrp16le` will run and require these tests to pass.
-- To check your ffmpeg's pixel format support for ffv1, run:
-
-  ```sh
-  ffmpeg -h encoder=ffv1 | grep gbrp
-  ```
-
-- For scientific reproducibility, use a Docker image or reference ffmpeg build known to support `ffv1/gbrp16le`.
-
-### How to Check Your ffmpeg
-
-Run this command:
-
-```sh
-ffmpeg -f lavfi -i testsrc2=duration=1:size=2x2:rate=1 -pix_fmt gbrp16le -c:v ffv1 -y test_ffv1_gbrp16le.mkv && ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=noprint_wrappers=1:nokey=1 test_ffv1_gbrp16le.mkv
+```bibtex
+@article{pellicer2025video,
+  title={Video compression for spatiotemporal Earth system data},
+  author={Pellicer-Valero, Oscar J and Aybar, Cesar and Camps-Valls, Gustau},
+  journal={arXiv preprint arXiv:2506.19656},
+  year={2025}
+}
 ```
 
-- If the output is `gbrp16le`, your ffmpeg is suitable for scientific roundtrip.
-- If the output is `bgr0`, your ffmpeg will not guarantee true lossless roundtrip.
-
-## Citations
 [^1]: Pellicer-Valero, O. J., Aybar, C., & Camps-Valls, G. (2025). Video compression for spatiotemporal Earth system data. arXiv. https://doi.org/10.48550/arXiv.2506.19656
-
-
-

@@ -1,14 +1,14 @@
 [project]
 name = "videoparquet"
-version = "0.1.1"
-description = "Convert Parquet files to video and back, inspired by xarrayvideo"
+version = "0.2.0"
+description = "Convert Parquet files to video and back using native PyAV encoding"
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.8"
 authors = [
     { name = "Your Name", email = "your.email@example.com" }
 ]
 license = { text = "MIT" }
-keywords = ["parquet", "video", "ffmpeg", "scientific-data", "compression"]
+keywords = ["parquet", "video", "compression", "scientific-data", "lossless"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -22,7 +22,7 @@ dependencies = [
     "pyarrow",
     "pandas",
     "numpy",
-    "ffmpeg-python",
+    "av",
     "scikit-learn"
 ]
 
@@ -46,5 +46,8 @@ build-backend = "setuptools.build_meta"
 packages = { find = { where = ["."] } }
 
 [tool.setuptools.package-data]
-# Include any non-Python files in the package if needed
-videoparquet = ["*.py"] 
+videoparquet = ["*.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
