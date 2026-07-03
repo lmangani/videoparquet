@@ -74,15 +74,19 @@ def video2parquet(input_path, array_id, name='test', exceptions='raise'):
                 array = array[..., :n_components]
             array = DR.inverse_transform(array)
 
-        # Reshape to DataFrame
+        # Reshape to DataFrame based on original column structure
         array = array[:num_frames, :height, :width, :channels]
-        flat = array.reshape(num_frames, -1)
 
         if columns is not None:
-            # Pad if needed due to rounding
-            if flat.shape[1] < len(columns):
-                pad_width = len(columns) - flat.shape[1]
-                flat = np.pad(flat, ((0, 0), (0, pad_width)), mode='constant')
+            num_cols = len(columns)
+            if num_cols == channels:
+                # Original: (frames*H*W, channels) - each row is a pixel
+                flat = array.reshape(-1, channels)
+            elif num_cols == height * width * channels:
+                # Original: (frames, H*W*C) - each row is a frame
+                flat = array.reshape(num_frames, -1)
+            else:
+                raise ValueError(f"Cannot determine reshape: {num_cols} cols vs shape {array.shape}")
 
             df_recon = pd.DataFrame(flat, columns=columns)
             out_path = Path(input_path) / array_id / f'reconstructed_{name}.parquet'

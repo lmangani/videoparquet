@@ -2,7 +2,7 @@
 
 # videoparquet
 
-**Store tabular data as video. Get 5-10x compression. Keep it lossless.**
+**Store sensor grid data as video. Get 2-4x compression vs Parquet. Keep it lossless.**
 
 Inspired by [xarrayvideo](https://github.com/IPL-UV/xarrayvideo) and its accompanying paper[^1], videoparquet converts Parquet files to video and back—leveraging video codecs' spatial/temporal compression for scientific and tabular data.
 
@@ -14,24 +14,30 @@ pip install videoparquet
 
 ## Why?
 
-Video codecs like FFV1 are designed to compress sequences of images with spatial and temporal patterns. Many scientific datasets (sensor arrays, time series, simulations) have similar structure. This library exploits that.
-
-| Data Type | Compression | Use Case |
-|-----------|-------------|----------|
-| **Random noise** | 4-6x | Baseline |
-| **Structured/scientific** | 7-10x | Sensor data, simulations |
-| **Highly correlated** | 10-25x | Satellite imagery, time series |
+Video codecs like FFV1 are designed to compress sequences of images with spatial and temporal patterns. Many scientific datasets (sensor arrays, environmental monitoring, simulations) have similar structure. This library exploits that.
 
 ## Benchmark
 
+Tested on thermal/environmental monitoring grid (100 time steps × 100×100 sensor grid × 3 metrics):
+
 ```
-Dataset          Parquet    Video     Ratio    Encode    Decode
-─────────────────────────────────────────────────────────────────
-Random 64³×3     9,991 KB   1,685 KB  5.9x     302 ms    512 ms
-Structured 64³×3 9,991 KB   1,390 KB  7.2x     361 ms    508 ms
+Format          Size        vs Raw    vs Parquet
+────────────────────────────────────────────────
+Raw numpy       11,719 KB      1x         -
+Parquet         13,035 KB    0.9x         1x
+Video (FFV1)     3,993 KB    2.9x       3.3x  🔥
 ```
 
-All roundtrips are **lossless** (max error < 0.001 per channel).
+**3.3x smaller than Parquet** with lossless roundtrip (max error < 0.001).
+
+### When to use videoparquet
+
+| ✅ Good fit | ❌ Better with Parquet |
+|-------------|------------------------|
+| Continuous float sensor data | Integer/categorical data |
+| Spatial grids (2D/3D arrays) | Sparse data with repeated values |
+| Time series with correlation | Data without spatial structure |
+| Scientific/observability data | Tabular business data |
 
 ## Quick Start
 
