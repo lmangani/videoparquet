@@ -16,9 +16,9 @@ pip install videoparquet
 
 ## Why?
 
-Because you can upload videos anywhere. YouTube, Vimeo, Google Drive, iCloud, that random video hosting site from 2008 that's somehow still running.
+Because its fun and you can upload and keep terabytes of videos files around for free.
 
-Your data becomes a video. Videos are forever. QED. 🎉
+Your data becomes a video smaller than the original. Videos are boring, nobody looks. 🎉
 
 *(Also: video codecs are surprisingly good at compressing structured numerical data.)*
 
