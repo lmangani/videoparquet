@@ -7,7 +7,7 @@ import numpy as np
 from pathlib import Path
 import os
 import time
-from .utils import normalize, is_float, DRWrapper, reorder_coords_axis
+from .utils import normalize, is_float, DRWrapper, reorder_coords_axis, infer_video_shape
 from .metadata import save_metadata
 from .av_wrappers import write_video
 
@@ -84,8 +84,13 @@ def parquet2video(parquet_path, array_id, conversion_rules, compute_stats=False,
                 if isinstance(columns, str):
                     columns = [columns]
                 array = df[columns].values
-                if shape is not None:
-                    array = array.reshape(shape)
+
+                # Auto-detect shape if not provided or 'auto'
+                if shape is None or shape == 'auto':
+                    shape = infer_video_shape(array)
+                    print_fn(f"Auto-detected shape: {shape}")
+
+                array = array.reshape(shape)
 
             # NaN handling
             if nan_fill is not None:

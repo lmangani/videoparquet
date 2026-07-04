@@ -57,6 +57,169 @@ def reorder_coords_axis(array, coords_in, coords_out, axis=-1):
     array_swapped = np.swapaxes(array, axis, 0)[new_order]
     return np.swapaxes(array_swapped, 0, axis)
 
+def infer_video_shape(df_or_array, target_frames=None):
+    """
+    Infer a video-compatible shape from a DataFrame or array.
+
+    Parameters
+    ----------
+    df_or_array : DataFrame, ndarray, or int
+        Input data or total element count.
+    target_frames : int, optional
+        Target number of frames. If None, auto-detect.
+
+    Returns
+    -------
+    tuple
+        (frames, height, width, 3) shape.
+
+    Raises
+    ------
+    ValueError
+        If no valid video shape can be found.
+
+    Examples
+    --------
+    >>> import pandas as pd
+    >>> df = pd.DataFrame(np.random.rand(100, 12288))  # 100 frames, 64x64x3
+    >>> infer_video_shape(df)
+    (100, 64, 64, 3)
+
+    >>> df = pd.DataFrame(np.random.rand(4096, 3))  # 4096 pixels, 3 channels
+    >>> infer_video_shape(df)
+    (1, 64, 64, 3)
+    """
+    import pandas as pd
+
+    if isinstance(df_or_array, pd.DataFrame):
+        n_rows, n_cols = df_or_array.shape
+        n_elements = n_rows * n_cols
+    elif isinstance(df_or_array, np.ndarray):
+        n_elements = df_or_array.size
+        n_cols = df_or_array.shape[-1] if df_or_array.ndim > 1 else 1
+        n_rows = n_elements // n_cols
+    else:
+        n_elements = int(df_or_array)
+        n_cols = None
+        n_rows = None
+
+    # Detect layout from column count
+    # If n_cols == 3: each row is a pixel -> (n_rows, H, W, 3) where n_rows = frames*H*W
+    # If n_cols == H*W*3: each row is a frame -> (n_rows, H, W, 3)
+
+    if n_cols == 3:
+        # Row-per-pixel layout: need to factor n_rows into frames*H*W
+        shape, padding = auto_detect_shape(n_rows * 3, n_columns=3)
+    elif n_cols is not None and n_cols % 3 == 0:
+        # Row-per-frame layout: n_cols should be H*W*3
+        pixels_per_frame = n_cols // 3
+        # Find H, W
+        h = w = int(pixels_per_frame ** 0.5)
+        if h * w != pixels_per_frame:
+            # Not square, find factors
+            for h in range(int(pixels_per_frame ** 0.5), 0, -1):
+                if pixels_per_frame % h == 0:
+                    w = pixels_per_frame // h
+                    break
+        shape = (n_rows, h, w, 3)
+        padding = 0
+    else:
+        shape, padding = auto_detect_shape(n_elements)
+
+    if shape is None:
+        raise ValueError(f"Cannot find valid video shape for {n_elements} elements")
+
+    return shape
+
+
+def auto_detect_shape(n_elements, n_columns=None, prefer_square=True):
+    """
+    Automatically detect a valid (frames, height, width, 3) shape for video encoding.
+
+    Parameters
+    ----------
+    n_elements : int
+        Total number of elements in the array.
+    n_columns : int, optional
+        Number of columns in the original DataFrame (helps determine layout).
+    prefer_square : bool
+        If True, prefer square-ish height/width dimensions.
+
+    Returns
+    -------
+    tuple
+        (frames, height, width, channels) shape, or None if no valid shape found.
+
+    Notes
+    -----
+    Video encoding requires 3 channels (RGB). The function tries to find
+    dimensions that work well with video codecs (multiples of 2 or 16).
+    """
+    channels = 3
+
+    # Total pixels needed
+    if n_elements % channels != 0:
+        # Can't evenly divide into 3 channels
+        # Try padding
+        n_elements_padded = ((n_elements // channels) + 1) * channels
+        padding_needed = n_elements_padded - n_elements
+    else:
+        n_elements_padded = n_elements
+        padding_needed = 0
+
+    total_pixels = n_elements_padded // channels
+
+    # If n_columns == 3, each row is a pixel (frames*H*W rows, 3 cols)
+    # If n_columns == H*W*3, each row is a frame (frames rows, H*W*3 cols)
+
+    # Find factors
+    def find_factors(n):
+        factors = []
+        for i in range(1, int(n**0.5) + 1):
+            if n % i == 0:
+                factors.append((i, n // i))
+        return factors
+
+    # Try to find good video dimensions
+    best_shape = None
+    best_score = float('inf')
+
+    # Try different frame counts
+    for frames in range(1, min(total_pixels, 1000) + 1):
+        if total_pixels % frames != 0:
+            continue
+
+        pixels_per_frame = total_pixels // frames
+
+        # Find height x width factors
+        for h, w in find_factors(pixels_per_frame):
+            # Prefer dimensions that are multiples of 16 (codec-friendly)
+            # and not too extreme in aspect ratio
+            aspect_ratio = max(h, w) / max(min(h, w), 1)
+
+            # Score: lower is better
+            # Penalize extreme aspect ratios
+            # Reward multiples of 16
+            # Reward square-ish if preferred
+            score = aspect_ratio
+            if h % 16 == 0:
+                score -= 0.5
+            if w % 16 == 0:
+                score -= 0.5
+            if prefer_square and abs(h - w) < max(h, w) * 0.5:
+                score -= 1
+
+            # Minimum dimension should be at least 4
+            if min(h, w) < 4:
+                continue
+
+            if score < best_score:
+                best_score = score
+                best_shape = (frames, h, w, channels)
+
+    return best_shape, padding_needed
+
+
 class DRWrapper:
     def __init__(self, n_components=None, params=None):
         if params is not None:

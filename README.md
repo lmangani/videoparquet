@@ -58,7 +58,7 @@ All roundtrips are **lossless** (max error < 0.001).
 ## Quick Start
 
 ```python
-from videoparquet import parquet2video, video2parquet
+from videoparquet import parquet2video, video2parquet, infer_video_shape
 import pandas as pd
 import numpy as np
 
@@ -67,11 +67,14 @@ arr = np.random.randn(16, 64, 64, 3).astype(np.float32)
 df = pd.DataFrame(arr.reshape(16, -1))
 df.to_parquet('data.parquet')
 
+# Auto-detect the video shape from your data
+print(infer_video_shape(df))  # → (16, 64, 64, 3)
+
 # Define what to convert
 conversion_rules = {
     'myarray': (
         list(df.columns),           # columns to use
-        (16, 64, 64, 3),            # reshape to (frames, H, W, channels)
+        'auto',                     # auto-detect shape (or specify manually)
         0,                          # PCA components (0 = none)
         {'c:v': 'ffv1'},            # codec (ffv1 = lossless)
         16,                         # bit depth
