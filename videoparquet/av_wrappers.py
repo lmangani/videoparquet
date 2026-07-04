@@ -2,6 +2,7 @@
 Native video encoding/decoding using PyAV.
 No external ffmpeg binary required - PyAV bundles libav libraries.
 All metadata is embedded directly in the MKV container - no sidecar files.
+Optional QR code metadata for platforms that strip container metadata.
 """
 
 import av
@@ -10,10 +11,93 @@ import json
 import os
 import base64
 import zlib
-import struct
 
 # Marker to identify videoparquet files
 VPARQUET_MARKER = 'VPARQUET_V2'
+
+# QR code support (optional)
+try:
+    import qrcode
+    import cv2
+    HAS_QR = True
+except ImportError:
+    HAS_QR = False
+
+
+def _create_qr_frame(metadata, frame_size):
+    """
+    Create a QR code frame containing compressed metadata.
+
+    Parameters
+    ----------
+    metadata : dict
+        Metadata to encode.
+    frame_size : tuple
+        (width, height) of the video frame.
+
+    Returns
+    -------
+    np.ndarray
+        RGB frame with QR code centered, or None if QR not available.
+    """
+    if not HAS_QR:
+        return None
+
+    encoded = _encode_metadata(metadata)
+
+    # Create QR with high error correction
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_H,
+        box_size=max(4, min(frame_size) // 50),
+        border=4,
+    )
+    qr.add_data(f'{VPARQUET_MARKER}:{encoded}')
+    qr.make(fit=True)
+
+    qr_img = qr.make_image(fill_color="black", back_color="white")
+    qr_array = np.array(qr_img.convert('RGB'))
+
+    # Create frame with QR centered
+    w, h = frame_size
+    frame = np.full((h, w, 3), 128, dtype=np.uint8)
+
+    qh, qw = qr_array.shape[:2]
+    if qw <= w and qh <= h:
+        ox, oy = (w - qw) // 2, (h - qh) // 2
+        frame[oy:oy+qh, ox:ox+qw] = qr_array
+
+    return frame
+
+
+def _decode_qr_frame(frame):
+    """
+    Decode metadata from a QR code frame.
+
+    Parameters
+    ----------
+    frame : np.ndarray
+        RGB frame that may contain a QR code.
+
+    Returns
+    -------
+    dict or None
+        Decoded metadata, or None if no valid QR found.
+    """
+    if not HAS_QR:
+        return None
+
+    try:
+        detector = cv2.QRCodeDetector()
+        data, _, _ = detector.detectAndDecode(frame)
+
+        if data and data.startswith(VPARQUET_MARKER + ':'):
+            encoded = data[len(VPARQUET_MARKER) + 1:]
+            return _decode_metadata(encoded)
+    except Exception:
+        pass
+
+    return None
 
 
 def _compress_columns(columns):
@@ -113,7 +197,7 @@ def _decode_metadata(encoded):
 
 
 def write_video(output_path, array, width, height, codec='ffv1', params=None,
-                pix_fmt='gbrp16le', metadata=None):
+                pix_fmt='gbrp16le', metadata=None, qr_metadata=False):
     """
     Write a numpy array (T, H, W, C) as a video file with embedded metadata.
 
@@ -135,6 +219,8 @@ def write_video(output_path, array, width, height, codec='ffv1', params=None,
         Pixel format ('gbrp16le' for 16-bit planar, 'rgb24' for 8-bit packed).
     metadata : dict
         Metadata to embed in the video container.
+    qr_metadata : bool
+        If True, prepend a QR code frame with metadata (survives re-encoding).
 
     Returns
     -------
@@ -143,6 +229,11 @@ def write_video(output_path, array, width, height, codec='ffv1', params=None,
     """
     params = params or {}
     metadata = metadata or {}
+
+    # Generate QR frame if requested (before dtype conversion)
+    qr_frame = None
+    if qr_metadata and HAS_QR:
+        qr_frame = _create_qr_frame(metadata, (width, height))
 
     # Validate and convert input dtype
     if codec == 'ffv1' and pix_fmt == 'gbrp16le':
@@ -185,8 +276,12 @@ def write_video(output_path, array, width, height, codec='ffv1', params=None,
         preset = params.get('preset', 'medium')
         stream.options = {'crf': str(crf), 'preset': preset}
     elif codec == 'libvpx-vp9':
-        crf = params.get('crf', 23)
-        stream.options = {'crf': str(crf), 'b:v': '0'}
+        crf = params.get('crf', 30)
+        stream.options = {'crf': str(crf)}
+
+    # Mark QR header before encoding metadata
+    if qr_frame is not None:
+        metadata['HAS_QR_HEADER'] = True
 
     # Embed metadata in container
     encoded_meta = _encode_metadata(metadata)
@@ -198,7 +293,20 @@ def write_video(output_path, array, width, height, codec='ffv1', params=None,
         # MP4/WebM/AVI: use 'comment' field with marker prefix
         container.metadata['comment'] = f'{VPARQUET_MARKER}:{encoded_meta}'
 
-    # Write frames
+    # Track frame index for pts
+    frame_idx = 0
+
+    # Write QR frame first if requested
+    if qr_frame is not None:
+        qr_av_frame = av.VideoFrame.from_ndarray(qr_frame, format='rgb24')
+        if encode_pix_fmt != 'rgb24':
+            qr_av_frame = qr_av_frame.reformat(format=encode_pix_fmt)
+        qr_av_frame.pts = frame_idx
+        for packet in stream.encode(qr_av_frame):
+            container.mux(packet)
+        frame_idx += 1
+
+    # Write data frames
     for i in range(array.shape[0]):
         frame_data = array[i]  # (H, W, C)
 
@@ -224,7 +332,8 @@ def write_video(output_path, array, width, height, codec='ffv1', params=None,
             if encode_pix_fmt != 'rgb24':
                 frame = frame.reformat(format=encode_pix_fmt)
 
-        frame.pts = i
+        frame.pts = frame_idx
+        frame_idx += 1
         for packet in stream.encode(frame):
             container.mux(packet)
 
@@ -271,6 +380,19 @@ def read_video(input_path):
             encoded_meta = comment[len(VPARQUET_MARKER) + 1:]
             metadata = _decode_metadata(encoded_meta)
 
+    # Try QR code in first frame (for re-encoded videos)
+    qr_checked = False
+    if metadata is None and HAS_QR:
+        # Read first frame and check for QR
+        for frame in container.decode(video=0):
+            first_frame = frame.to_ndarray(format='rgb24')
+            metadata = _decode_qr_frame(first_frame)
+            qr_checked = True
+            break
+        # Reset container to read from start
+        container.close()
+        container = av.open(input_path)
+
     # Legacy support: try sidecar file
     if metadata is None:
         sidecar_path = f"{input_path}.meta.json"
@@ -287,10 +409,17 @@ def read_video(input_path):
     actual_pix_fmt = stream.pix_fmt
 
     output_pix_fmt = metadata.get('OUT_PIX_FMT', 'rgb24')
+    has_qr_header = metadata.get('HAS_QR_HEADER', False)
 
     # Read frames
     frames = []
+    frame_count = 0
     for frame in container.decode(video=0):
+        # Skip QR header frame if present
+        if has_qr_header and frame_count == 0:
+            frame_count += 1
+            continue
+        frame_count += 1
         if output_pix_fmt == 'gbrp16le':
             planes_data = []
             for plane_idx in range(3):

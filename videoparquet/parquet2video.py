@@ -32,6 +32,7 @@ def parquet2video(parquet_path, array_id, conversion_rules, compute_stats=False,
         - 'format': container format ('mkv', 'mp4', 'webm'). Default: 'mkv'
         - 'crf': quality for lossy codecs (0-51, lower=better). Default: 23
         - 'preset': encoding speed ('ultrafast' to 'veryslow'). Default: 'medium'
+        - 'qr_metadata': if True, prepend QR code frame (survives re-encoding)
     compute_stats : bool
         Whether to compute and print compression statistics.
     output_path : str or Path
@@ -182,12 +183,14 @@ def parquet2video(parquet_path, array_id, conversion_rules, compute_stats=False,
 
             # Write video (metadata is embedded in the container)
             video_path = output_path / array_id / f'{name}{ext}'
+            qr_metadata = params.get('qr_metadata', False)
             t0 = time.time()
             actual_pix_fmt = write_video(
                 str(video_path), array,
                 width=array.shape[2], height=array.shape[1],
                 codec=vcodec, params=params,
-                pix_fmt=input_pix_fmt, metadata=metadata
+                pix_fmt=input_pix_fmt, metadata=metadata,
+                qr_metadata=qr_metadata
             )
             t1 = time.time()
 
