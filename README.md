@@ -10,7 +10,7 @@ Convert Parquet → Video → Upload to any video site → Download → Video �
 pip install videoparquet
 ```
 
-> ⚠️ **This is a novelty project!** A fun experiment in using video platforms as data storage. Not for production use. Inspired by [xarrayvideo](https://github.com/IPL-UV/xarrayvideo)[^1].
+> ⚠️ **This is just a fun experiment in using video platforms as data storage. Not for production use. 
 
 > **No external dependencies.** Uses [PyAV](https://github.com/PyAV-Org/PyAV) with bundled FFmpeg libraries. No `ffmpeg` binary required.
 
@@ -182,17 +182,9 @@ pytest tests/ -v
 
 MIT
 
-## Citation
+## Credits
 
-If you use this in research, please cite the xarrayvideo paper:
+Idea inspired by [xarrayvideo](https://github.com/IPL-UV/xarrayvideo)[^1].
 
-```bibtex
-@article{pellicer2025video,
-  title={Video compression for spatiotemporal Earth system data},
-  author={Pellicer-Valero, Oscar J and Aybar, Cesar and Camps-Valls, Gustau},
-  journal={arXiv preprint arXiv:2506.19656},
-  year={2025}
-}
-```
 
 [^1]: Pellicer-Valero, O. J., Aybar, C., & Camps-Valls, G. (2025). Video compression for spatiotemporal Earth system data. arXiv. https://doi.org/10.48550/arXiv.2506.19656
