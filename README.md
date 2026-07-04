@@ -12,15 +12,12 @@ pip install videoparquet
 
 > ⚠️ **This is just a fun experiment in using video platforms as data storage. Not for production use. 
 
-> **No external dependencies.** Uses [PyAV](https://github.com/PyAV-Org/PyAV) with bundled FFmpeg libraries. No `ffmpeg` binary required.
 
-## Why?
+### Parquet to Video? Just.. why?
 
-Because its fun and you can upload and keep terabytes of videos files around for free.
-
-Your data becomes a video smaller than the original. Videos are boring, nobody looks. 🎉
-
-*(Also: video codecs are surprisingly good at compressing structured numerical data.)*
+* Because its fun and you can upload and keep terabytes of videos files around for free
+* Video codecs are surprisingly good at compressing structured numerical data
+* Your data becomes a video and videos are boring, nobody looks for data there 🎉
 
 ## Benchmark
 
@@ -177,10 +174,6 @@ pytest tests/ -v
 - Only 3-channel arrays supported (maps to RGB video planes)
 - FFV1 lossless requires 16-bit planar format (`gbrp16le`)
 - Data must be reshapeable to `(frames, height, width, 3)`
-
-## License
-
-MIT
 
 ## Credits
 
