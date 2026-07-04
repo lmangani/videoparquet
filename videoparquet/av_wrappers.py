@@ -163,7 +163,8 @@ def write_video(output_path, array, width, height, codec='ffv1', params=None,
 
     # Determine container format
     ext = os.path.splitext(output_path)[1].lower()
-    container_format = 'matroska' if ext == '.mkv' else 'mp4'
+    format_map = {'.mkv': 'matroska', '.mp4': 'mp4', '.webm': 'webm', '.avi': 'avi'}
+    container_format = format_map.get(ext, 'matroska')
 
     # Create container and stream
     container = av.open(output_path, mode='w', format=container_format)
@@ -179,11 +180,23 @@ def write_video(output_path, array, width, height, codec='ffv1', params=None,
         crf = params.get('crf', 23)
         preset = params.get('preset', 'medium')
         stream.options = {'crf': str(crf), 'preset': preset}
+    elif codec == 'libx265':
+        crf = params.get('crf', 23)
+        preset = params.get('preset', 'medium')
+        stream.options = {'crf': str(crf), 'preset': preset}
+    elif codec == 'libvpx-vp9':
+        crf = params.get('crf', 23)
+        stream.options = {'crf': str(crf), 'b:v': '0'}
 
     # Embed metadata in container
-    # MKV supports arbitrary metadata tags
-    container.metadata['VPARQUET'] = VPARQUET_MARKER
-    container.metadata['VPARQUET_META'] = _encode_metadata(metadata)
+    encoded_meta = _encode_metadata(metadata)
+    if container_format == 'matroska':
+        # MKV supports arbitrary custom tags
+        container.metadata['VPARQUET'] = VPARQUET_MARKER
+        container.metadata['VPARQUET_META'] = encoded_meta
+    else:
+        # MP4/WebM/AVI: use 'comment' field with marker prefix
+        container.metadata['comment'] = f'{VPARQUET_MARKER}:{encoded_meta}'
 
     # Write frames
     for i in range(array.shape[0]):
@@ -243,9 +256,23 @@ def read_video(input_path):
 
     # Extract embedded metadata from container
     container_meta = dict(container.metadata)
+    metadata = None
 
-    if 'VPARQUET' not in container_meta:
-        # Legacy support: try sidecar file
+    # Try MKV custom tags first
+    if 'VPARQUET' in container_meta:
+        encoded_meta = container_meta.get('VPARQUET_META', '')
+        if encoded_meta:
+            metadata = _decode_metadata(encoded_meta)
+
+    # Try comment field (MP4/WebM/AVI)
+    if metadata is None and 'comment' in container_meta:
+        comment = container_meta['comment']
+        if comment.startswith(VPARQUET_MARKER + ':'):
+            encoded_meta = comment[len(VPARQUET_MARKER) + 1:]
+            metadata = _decode_metadata(encoded_meta)
+
+    # Legacy support: try sidecar file
+    if metadata is None:
         sidecar_path = f"{input_path}.meta.json"
         if os.path.exists(sidecar_path):
             with open(sidecar_path, 'r') as f:
@@ -253,13 +280,6 @@ def read_video(input_path):
         else:
             container.close()
             raise RuntimeError(f'Not a videoparquet file (no embedded metadata): {input_path}')
-    else:
-        # Decode embedded metadata
-        encoded_meta = container_meta.get('VPARQUET_META', '')
-        if not encoded_meta:
-            container.close()
-            raise RuntimeError(f'Corrupted videoparquet file (empty metadata): {input_path}')
-        metadata = _decode_metadata(encoded_meta)
 
     stream = container.streams.video[0]
     width = stream.width
@@ -324,9 +344,19 @@ def is_videoparquet(input_path):
     """
     try:
         container = av.open(input_path)
-        has_marker = 'VPARQUET' in dict(container.metadata)
+        meta = dict(container.metadata)
         container.close()
-        return has_marker
+
+        # Check MKV custom tag
+        if 'VPARQUET' in meta:
+            return True
+
+        # Check comment field (MP4/WebM/AVI)
+        comment = meta.get('comment', '')
+        if comment.startswith(VPARQUET_MARKER + ':'):
+            return True
+
+        return False
     except Exception:
         return False
 
@@ -350,13 +380,18 @@ def get_embedded_metadata(input_path):
         container_meta = dict(container.metadata)
         container.close()
 
-        if 'VPARQUET' not in container_meta:
-            return None
+        # Try MKV custom tag
+        if 'VPARQUET' in container_meta:
+            encoded_meta = container_meta.get('VPARQUET_META', '')
+            if encoded_meta:
+                return _decode_metadata(encoded_meta)
 
-        encoded_meta = container_meta.get('VPARQUET_META', '')
-        if not encoded_meta:
-            return None
+        # Try comment field (MP4/WebM/AVI)
+        comment = container_meta.get('comment', '')
+        if comment.startswith(VPARQUET_MARKER + ':'):
+            encoded_meta = comment[len(VPARQUET_MARKER) + 1:]
+            return _decode_metadata(encoded_meta)
 
-        return _decode_metadata(encoded_meta)
+        return None
     except Exception:
         return None

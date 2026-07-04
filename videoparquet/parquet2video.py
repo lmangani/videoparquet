@@ -26,6 +26,12 @@ def parquet2video(parquet_path, array_id, conversion_rules, compute_stats=False,
     conversion_rules : dict
         Dict specifying which columns/arrays to convert and how.
         Format: {name: (columns, shape, n_components, params, bits, value_range)}
+
+        params dict options:
+        - 'c:v': codec ('ffv1' for lossless, 'libx264'/'libx265'/'libvpx-vp9' for lossy)
+        - 'format': container format ('mkv', 'mp4', 'webm'). Default: 'mkv'
+        - 'crf': quality for lossy codecs (0-51, lower=better). Default: 23
+        - 'preset': encoding speed ('ultrafast' to 'veryslow'). Default: 'medium'
     compute_stats : bool
         Whether to compute and print compression statistics.
     output_path : str or Path
@@ -151,6 +157,11 @@ def parquet2video(parquet_path, array_id, conversion_rules, compute_stats=False,
                 channel_idx = [list('rgb').index(c) for c in list(ordering)]
                 value_range = value_range[channel_idx]
 
+            # Determine container format
+            container_format = params.get('format', 'mkv')
+            ext_map = {'mkv': '.mkv', 'mp4': '.mp4', 'webm': '.webm', 'avi': '.avi'}
+            ext = ext_map.get(container_format, '.mkv')
+
             # Build metadata
             metadata = {
                 'shape': list(map(int, array.shape)),
@@ -164,13 +175,13 @@ def parquet2video(parquet_path, array_id, conversion_rules, compute_stats=False,
                 'OUT_PIX_FMT': input_pix_fmt,
                 'PLANAR': input_pix_fmt.startswith('gbrp'),
                 'CODEC': vcodec,
-                'ext': '.mkv',
+                'ext': ext,
                 'CHANNEL_ORDER': ordering,
                 'pca_params': pca_params,
             }
 
             # Write video (metadata is embedded in the container)
-            video_path = output_path / array_id / f'{name}.mkv'
+            video_path = output_path / array_id / f'{name}{ext}'
             t0 = time.time()
             actual_pix_fmt = write_video(
                 str(video_path), array,

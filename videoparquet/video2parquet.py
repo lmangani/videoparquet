@@ -37,12 +37,19 @@ def video2parquet(input_path, array_id=None, name='test', exceptions='raise'):
         input_path = Path(input_path)
 
         # Determine video path
-        if input_path.suffix == '.mkv':
+        if input_path.suffix in ('.mkv', '.mp4', '.webm', '.avi'):
             video_path = input_path
         elif array_id is not None:
-            video_path = input_path / array_id / f'{name}.mkv'
+            # Try to find the video file with any supported extension
+            for ext in ('.mkv', '.mp4', '.webm', '.avi'):
+                candidate = input_path / array_id / f'{name}{ext}'
+                if candidate.exists():
+                    video_path = candidate
+                    break
+            else:
+                video_path = input_path / array_id / f'{name}.mkv'  # Default
         else:
-            raise ValueError("Either provide a .mkv file path or specify array_id")
+            raise ValueError("Either provide a video file path or specify array_id")
 
         # Read video with embedded metadata
         array, metadata = read_video(str(video_path))

@@ -91,12 +91,32 @@ video2parquet('./output/dataset_id/myarray.mkv')
 # Creates: ./output/dataset_id/reconstructed_myarray.parquet
 ```
 
-## Supported Codecs
+## Format Options
 
-| Codec | Type | Format | Best For |
-|-------|------|--------|----------|
-| `ffv1` | Lossless | `gbrp16le` (16-bit) | Scientific data, exact roundtrip |
-| `libx264` | Lossy | `yuv420p` (8-bit) | Preview, smaller files |
+**Defaults**: MKV container + FFV1 codec (lossless, recommended for local/cloud storage)
+
+```python
+# Lossless (default)
+params = {'c:v': 'ffv1'}
+
+# Lossy H.264 for YouTube/sharing (smaller files)
+params = {'c:v': 'libx264', 'format': 'mp4', 'crf': 18}
+
+# Lossy H.265 (better compression, less compatible)
+params = {'c:v': 'libx265', 'format': 'mp4', 'crf': 20}
+
+# VP9 for WebM
+params = {'c:v': 'libvpx-vp9', 'format': 'webm', 'crf': 20}
+```
+
+| Codec | Type | Container | Best For |
+|-------|------|-----------|----------|
+| `ffv1` | Lossless | MKV | Local storage, exact roundtrip |
+| `libx264` | Lossy | MP4 | YouTube, sharing, preview |
+| `libx265` | Lossy | MP4 | Smaller files, modern players |
+| `libvpx-vp9` | Lossy | WebM | Web, open format |
+
+> ⚠️ **YouTube note**: YouTube re-encodes all uploads. Use MP4/H.264 for best compatibility. Metadata is preserved in the file but may be stripped by some platforms.
 
 ## How It Works
 
