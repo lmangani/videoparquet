@@ -10,7 +10,7 @@ Convert Parquet → Video → Upload to any video site → Download → Video �
 pip install videoparquet
 ```
 
-> ⚠️ **This is just a fun experiment in using video platforms as data storage. Not for production use. 
+> ⚠️ This is just a fun experiment in using video platforms as data storage. Not for production use. 
 
 
 ### Parquet to Video? Just.. why?
