@@ -84,10 +84,10 @@ conversion_rules = {
 
 # Convert Parquet → Video
 parquet2video('data.parquet', 'dataset_id', conversion_rules, output_path='./output')
-# Creates: ./output/dataset_id/myarray.mkv
+# Creates: ./output/dataset_id/myarray.mkv (single file, all metadata embedded!)
 
-# Convert Video → Parquet
-video2parquet('./output', 'dataset_id', name='myarray')
+# Convert Video → Parquet (just pass the .mkv file directly)
+video2parquet('./output/dataset_id/myarray.mkv')
 # Creates: ./output/dataset_id/reconstructed_myarray.parquet
 ```
 
@@ -103,10 +103,10 @@ video2parquet('./output', 'dataset_id', name='myarray')
 1. **Reshape**: Tabular data → 4D array `(frames, height, width, channels)`
 2. **Normalize**: Scale values to 16-bit range, track min/max per channel
 3. **Encode**: Write as video using FFV1 codec (lossless, planar RGB)
-4. **Decode**: Read video, denormalize using stored metadata
+4. **Decode**: Read video, denormalize using embedded metadata
 5. **Reconstruct**: Reshape back to original DataFrame
 
-Metadata (shape, normalization params, column names) is stored in a sidecar JSON file.
+**All-in-one file**: Metadata (shape, normalization params, column names) is embedded directly in the MKV container. No sidecar files needed - just upload/download the single `.mkv` file.
 
 ## Installation
 

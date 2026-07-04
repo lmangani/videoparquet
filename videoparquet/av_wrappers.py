@@ -1,18 +1,121 @@
 """
 Native video encoding/decoding using PyAV.
 No external ffmpeg binary required - PyAV bundles libav libraries.
+All metadata is embedded directly in the MKV container - no sidecar files.
 """
 
 import av
 import numpy as np
 import json
 import os
+import base64
+import zlib
+import struct
+
+# Marker to identify videoparquet files
+VPARQUET_MARKER = 'VPARQUET_V2'
+
+
+def _compress_columns(columns):
+    """
+    Compress column list to a compact representation.
+
+    Detects patterns:
+    - Numeric: [0, 1, 2, ...] -> {"_t": "range", "n": count}
+    - Prefixed: ["col0", "col1", ...] -> {"_t": "prefix", "p": "col", "n": count}
+    - Otherwise: store as-is
+    """
+    if columns is None:
+        return None
+
+    n = len(columns)
+    if n == 0:
+        return []
+
+    # Check if all numeric (0, 1, 2, ...)
+    try:
+        if all(int(c) == i for i, c in enumerate(columns)):
+            return {'_t': 'range', 'n': n}
+    except (ValueError, TypeError):
+        pass
+
+    # Check for common prefix pattern
+    first = str(columns[0])
+    for prefix_len in range(len(first), 0, -1):
+        prefix = first[:prefix_len]
+        try:
+            if all(str(c).startswith(prefix) and int(str(c)[prefix_len:]) == i
+                   for i, c in enumerate(columns)):
+                return {'_t': 'prefix', 'p': prefix, 'n': n}
+        except (ValueError, TypeError):
+            continue
+
+    # No pattern found, store as-is (but only first 100 + count for very long lists)
+    if n > 100:
+        return {'_t': 'sample', 'cols': [str(c) for c in columns[:100]], 'n': n}
+
+    return [str(c) for c in columns]
+
+
+def _expand_columns(compressed):
+    """Expand compressed column representation back to list."""
+    if compressed is None:
+        return None
+
+    if isinstance(compressed, list):
+        return compressed
+
+    if isinstance(compressed, dict):
+        t = compressed.get('_t')
+        n = compressed.get('n', 0)
+
+        if t == 'range':
+            return [str(i) for i in range(n)]
+        elif t == 'prefix':
+            prefix = compressed.get('p', '')
+            return [f"{prefix}{i}" for i in range(n)]
+        elif t == 'sample':
+            # Best effort: use sample if matches, else generate numeric
+            return [str(i) for i in range(n)]
+
+    return None
+
+
+def _encode_metadata(metadata):
+    """Compress and encode metadata for embedding in container."""
+    # Optimize columns storage
+    optimized = metadata.copy()
+    if 'columns' in optimized:
+        optimized['columns'] = _compress_columns(optimized['columns'])
+
+    # Convert numpy arrays to lists
+    for key, value in optimized.items():
+        if isinstance(value, np.ndarray):
+            optimized[key] = value.tolist()
+
+    json_bytes = json.dumps(optimized, separators=(',', ':')).encode('utf-8')
+    compressed = zlib.compress(json_bytes, level=9)
+    encoded = base64.b64encode(compressed).decode('ascii')
+    return encoded
+
+
+def _decode_metadata(encoded):
+    """Decode and decompress metadata from container."""
+    compressed = base64.b64decode(encoded)
+    json_bytes = zlib.decompress(compressed)
+    metadata = json.loads(json_bytes.decode('utf-8'))
+
+    # Expand columns
+    if 'columns' in metadata:
+        metadata['columns'] = _expand_columns(metadata['columns'])
+
+    return metadata
 
 
 def write_video(output_path, array, width, height, codec='ffv1', params=None,
                 pix_fmt='gbrp16le', metadata=None):
     """
-    Write a numpy array (T, H, W, C) as a video file.
+    Write a numpy array (T, H, W, C) as a video file with embedded metadata.
 
     Parameters
     ----------
@@ -31,7 +134,7 @@ def write_video(output_path, array, width, height, codec='ffv1', params=None,
     pix_fmt : str
         Pixel format ('gbrp16le' for 16-bit planar, 'rgb24' for 8-bit packed).
     metadata : dict
-        Metadata to store alongside the video.
+        Metadata to embed in the video container.
 
     Returns
     -------
@@ -39,6 +142,7 @@ def write_video(output_path, array, width, height, codec='ffv1', params=None,
         The actual pixel format used.
     """
     params = params or {}
+    metadata = metadata or {}
 
     # Validate and convert input dtype
     if codec == 'ffv1' and pix_fmt == 'gbrp16le':
@@ -56,13 +160,6 @@ def write_video(output_path, array, width, height, codec='ffv1', params=None,
             raise ValueError('Only 3-channel arrays supported')
         pix_fmt = 'rgb24'
         encode_pix_fmt = 'yuv420p' if codec == 'libx264' else 'rgb24'
-
-    # Generate metadata ID and save sidecar
-    base = os.path.splitext(os.path.basename(output_path))[0]
-    meta_id = f"VPARQUET_{base}"
-    sidecar_path = f"{output_path}.meta.json"
-    with open(sidecar_path, 'w') as f:
-        json.dump(metadata or {}, f)
 
     # Determine container format
     ext = os.path.splitext(output_path)[1].lower()
@@ -83,8 +180,10 @@ def write_video(output_path, array, width, height, codec='ffv1', params=None,
         preset = params.get('preset', 'medium')
         stream.options = {'crf': str(crf), 'preset': preset}
 
-    # Store metadata reference
-    container.metadata['VPARQUET_ID'] = meta_id
+    # Embed metadata in container
+    # MKV supports arbitrary metadata tags
+    container.metadata['VPARQUET'] = VPARQUET_MARKER
+    container.metadata['VPARQUET_META'] = _encode_metadata(metadata)
 
     # Write frames
     for i in range(array.shape[0]):
@@ -128,6 +227,8 @@ def read_video(input_path):
     """
     Read a video file into a numpy array (T, H, W, C).
 
+    Metadata is extracted from the MKV container - no sidecar files needed.
+
     Parameters
     ----------
     input_path : str
@@ -140,14 +241,25 @@ def read_video(input_path):
     """
     container = av.open(input_path)
 
-    # Load metadata from sidecar
-    sidecar_path = f"{input_path}.meta.json"
-    if not os.path.exists(sidecar_path):
-        container.close()
-        raise RuntimeError(f'Missing metadata file: {sidecar_path}')
+    # Extract embedded metadata from container
+    container_meta = dict(container.metadata)
 
-    with open(sidecar_path, 'r') as f:
-        metadata = json.load(f)
+    if 'VPARQUET' not in container_meta:
+        # Legacy support: try sidecar file
+        sidecar_path = f"{input_path}.meta.json"
+        if os.path.exists(sidecar_path):
+            with open(sidecar_path, 'r') as f:
+                metadata = json.load(f)
+        else:
+            container.close()
+            raise RuntimeError(f'Not a videoparquet file (no embedded metadata): {input_path}')
+    else:
+        # Decode embedded metadata
+        encoded_meta = container_meta.get('VPARQUET_META', '')
+        if not encoded_meta:
+            container.close()
+            raise RuntimeError(f'Corrupted videoparquet file (empty metadata): {input_path}')
+        metadata = _decode_metadata(encoded_meta)
 
     stream = container.streams.video[0]
     width = stream.width
@@ -155,7 +267,6 @@ def read_video(input_path):
     actual_pix_fmt = stream.pix_fmt
 
     output_pix_fmt = metadata.get('OUT_PIX_FMT', 'rgb24')
-    num_frames = int(metadata.get('FRAMES', 0))
 
     # Read frames
     frames = []
@@ -195,3 +306,57 @@ def read_video(input_path):
         raise ValueError(f"Size mismatch: got {video_data.size}, expected {np.prod(expected_shape)}")
 
     return video_data, metadata
+
+
+def is_videoparquet(input_path):
+    """
+    Check if a video file is a videoparquet file with embedded metadata.
+
+    Parameters
+    ----------
+    input_path : str
+        Path to the video file.
+
+    Returns
+    -------
+    bool
+        True if the file has videoparquet metadata embedded.
+    """
+    try:
+        container = av.open(input_path)
+        has_marker = 'VPARQUET' in dict(container.metadata)
+        container.close()
+        return has_marker
+    except Exception:
+        return False
+
+
+def get_embedded_metadata(input_path):
+    """
+    Extract metadata from a videoparquet file without decoding video.
+
+    Parameters
+    ----------
+    input_path : str
+        Path to the video file.
+
+    Returns
+    -------
+    dict
+        The embedded metadata, or None if not a videoparquet file.
+    """
+    try:
+        container = av.open(input_path)
+        container_meta = dict(container.metadata)
+        container.close()
+
+        if 'VPARQUET' not in container_meta:
+            return None
+
+        encoded_meta = container_meta.get('VPARQUET_META', '')
+        if not encoded_meta:
+            return None
+
+        return _decode_metadata(encoded_meta)
+    except Exception:
+        return None

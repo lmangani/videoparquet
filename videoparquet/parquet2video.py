@@ -8,7 +8,6 @@ from pathlib import Path
 import os
 import time
 from .utils import normalize, is_float, DRWrapper, reorder_coords_axis, infer_video_shape
-from .metadata import save_metadata
 from .av_wrappers import write_video
 
 
@@ -170,7 +169,7 @@ def parquet2video(parquet_path, array_id, conversion_rules, compute_stats=False,
                 'pca_params': pca_params,
             }
 
-            # Write video
+            # Write video (metadata is embedded in the container)
             video_path = output_path / array_id / f'{name}.mkv'
             t0 = time.time()
             actual_pix_fmt = write_video(
@@ -181,11 +180,6 @@ def parquet2video(parquet_path, array_id, conversion_rules, compute_stats=False,
             )
             t1 = time.time()
 
-            # Save metadata
-            metadata['ACTUAL_PIX_FMT'] = actual_pix_fmt
-            meta_path = output_path / array_id / f'{name}.json'
-            save_metadata(metadata, meta_path)
-
             # Compute stats
             original_size = array.size * array.itemsize / 2**20
             compressed_size = os.stat(video_path).st_size / 2**20
@@ -194,7 +188,6 @@ def parquet2video(parquet_path, array_id, conversion_rules, compute_stats=False,
 
             results[name] = {
                 'path': str(video_path),
-                'metadata': str(meta_path),
                 'original_size_MB': original_size,
                 'compressed_size_MB': compressed_size,
                 'compression_ratio': compression,

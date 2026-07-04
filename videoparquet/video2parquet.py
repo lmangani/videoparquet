@@ -1,27 +1,30 @@
 """
 Convert video files back to Parquet format using native PyAV decoding.
+Metadata is read directly from the video container - no sidecar files needed.
 """
 
 import pandas as pd
 import numpy as np
 from pathlib import Path
 from .utils import denormalize, DRWrapper, reorder_coords_axis
-from .metadata import load_metadata
 from .av_wrappers import read_video
 
 
-def video2parquet(input_path, array_id, name='test', exceptions='raise'):
+def video2parquet(input_path, array_id=None, name='test', exceptions='raise'):
     """
-    Reconstruct a Parquet file from video files and associated metadata.
+    Reconstruct a Parquet file from a videoparquet video file.
+
+    Metadata is extracted directly from the video container.
 
     Parameters
     ----------
     input_path : str or Path
-        Directory containing the video and metadata files.
-    array_id : str
-        Identifier for the dataset (subdirectory name).
+        Either a direct path to the .mkv file, or a directory containing videos.
+    array_id : str, optional
+        Identifier for the dataset (subdirectory name). Not needed if input_path
+        points directly to a .mkv file.
     name : str
-        Name of the array/video to reconstruct.
+        Name of the array/video to reconstruct (used with array_id).
     exceptions : str
         'raise' to raise exceptions, 'ignore' to suppress.
 
@@ -31,11 +34,18 @@ def video2parquet(input_path, array_id, name='test', exceptions='raise'):
         Path to the reconstructed Parquet file, or None if no columns defined.
     """
     try:
-        meta_path = Path(input_path) / array_id / f'{name}.json'
-        metadata = load_metadata(meta_path)
+        input_path = Path(input_path)
 
-        ext = metadata.get('ext', '.mkv')
-        video_path = Path(input_path) / array_id / f'{name}{ext}'
+        # Determine video path
+        if input_path.suffix == '.mkv':
+            video_path = input_path
+        elif array_id is not None:
+            video_path = input_path / array_id / f'{name}.mkv'
+        else:
+            raise ValueError("Either provide a .mkv file path or specify array_id")
+
+        # Read video with embedded metadata
+        array, metadata = read_video(str(video_path))
 
         shape = metadata['shape']
         minmax = np.array(metadata['minmax'])
@@ -50,9 +60,6 @@ def video2parquet(input_path, array_id, name='test', exceptions='raise'):
             ordering = metadata.get('CHANNEL_ORDER', 'gbr')
             channel_idx = [list(ordering).index(c) for c in 'rgb']
             minmax = minmax[channel_idx]
-
-        # Read video
-        array, _ = read_video(str(video_path))
 
         # Crop to expected shape
         array = array[:shape[0], :shape[1], :shape[2], :shape[3]]
@@ -89,7 +96,9 @@ def video2parquet(input_path, array_id, name='test', exceptions='raise'):
                 raise ValueError(f"Cannot determine reshape: {num_cols} cols vs shape {array.shape}")
 
             df_recon = pd.DataFrame(flat, columns=columns)
-            out_path = Path(input_path) / array_id / f'reconstructed_{name}.parquet'
+
+            # Output path: next to the video file
+            out_path = video_path.parent / f'reconstructed_{video_path.stem}.parquet'
             df_recon.to_parquet(out_path)
             return out_path
 
