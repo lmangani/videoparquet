@@ -2,7 +2,7 @@
 
 # videoparquet
 
-**Back up your Parquet files to YouTube. Up to 7x compression.** 🎬📊
+**Back up your Parquet into Video files. Up to 7x compression.** 🎬📊
 
 Convert Parquet → Video → Upload to any video site → Download → Video → Parquet. Your data survives!
 
